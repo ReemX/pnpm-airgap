@@ -35,8 +35,8 @@ program
         concurrency: 5,
         registryUrl: 'https://registry.npmjs.org',
         skipOptional: false,
-        // Config file overrides defaults
-        ...config,
+        // Config file overrides defaults (use fetch section)
+        ...(config.fetch || {}),
         // Only CLI options that were actually provided override config
         ...(options.lockfile && { lockfilePath: options.lockfile }),
         ...(options.output && { outputDir: options.output })
@@ -80,8 +80,8 @@ program
         registryUrl: 'http://localhost:4873',
         concurrency: 3,
         skipExisting: true,
-        // Config file overrides defaults
-        ...config,
+        // Config file overrides defaults (use publish section)
+        ...(config.publish || {}),
         // Only CLI options that were actually provided override config
         ...(options.packages && { packagesDir: options.packages }),
         ...(options.registry && { registryUrl: options.registry })
@@ -97,6 +97,30 @@ program
       await publisher.publishPackages(finalConfig);
 
       console.log(chalk.green('✅ All packages published successfully!'));
+    } catch (error) {
+      console.error(chalk.red('❌ Error:'), error.message);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('bootstrap')
+  .description('Publish packages without dependencies (for initial Verdaccio setup)')
+  .option('-p, --packages <path>', 'Path to packages directory', './airgap-packages')
+  .option('-r, --registry <url>', 'Verdaccio registry URL', 'http://localhost:4873')
+  .action(async (options) => {
+    const bootstrap = require('../lib/bootstrap-publisher');
+
+    try {
+      console.log(chalk.blue('🚀 Bootstrap mode - dependency-free publishing'));
+      console.log(chalk.yellow('⚠️  Make sure you are logged in to the registry:'));
+      console.log(chalk.gray(`   npm login --registry ${options.registry}`));
+      console.log();
+
+      await bootstrap.bootstrapPublish(options.packages, options.registry);
+
+      console.log(chalk.green('✅ Bootstrap publishing complete!'));
+      console.log(chalk.gray('You can now install pnpm-airgap normally and use the full publish command.'));
     } catch (error) {
       console.error(chalk.red('❌ Error:'), error.message);
       process.exit(1);
