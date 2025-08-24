@@ -1,0 +1,7 @@
+test/
+*.test.js
+.github/
+.vscode/
+airgap-packages/
+*.tgz
+pnpm-airgap.config.json

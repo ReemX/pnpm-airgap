@@ -1,0 +1,13 @@
+node_modules/
+*.log
+*.tgz
+airgap-packages/
+.DS_Store
+.env
+dist/
+coverage/
+.npm
+.yarn
+pnpm-lock.yaml
+package-lock.json
+yarn.lock
