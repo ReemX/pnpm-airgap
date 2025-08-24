@@ -13,27 +13,33 @@ program
 program
   .command('fetch')
   .description('Fetch all dependencies from pnpm lockfile (online mode)')
-  .option('-c, --config <path>', 'Path to config file', './pnpm-airgap.config.json')
-  .option('-l, --lockfile <path>', 'Path to pnpm-lock.yaml', './pnpm-lock.yaml')
-  .option('-o, --output <path>', 'Output directory for packages', './airgap-packages')
+  .option('-c, --config <path>', 'Path to config file')
+  .option('-l, --lockfile <path>', 'Path to pnpm-lock.yaml')
+  .option('-o, --output <path>', 'Output directory for packages')
   .action(async (options) => {
     const fetcher = require('../lib/online-fetcher');
 
     try {
       // Load config
+      const configPath = options.config || './pnpm-airgap.config.json';
       let config = {};
-      if (await fs.pathExists(options.config)) {
-        config = await fs.readJson(options.config);
+      if (await fs.pathExists(configPath)) {
+        config = await fs.readJson(configPath);
       }
 
-      // Merge CLI options with config
+      // Merge CLI options with config - smart defaults handling
       const finalConfig = {
-        lockfilePath: options.lockfile,
-        outputDir: options.output,
+        // Base defaults
+        lockfilePath: './pnpm-lock.yaml',
+        outputDir: './airgap-packages',
         concurrency: 5,
         registryUrl: 'https://registry.npmjs.org',
+        skipOptional: false,
+        // Config file overrides defaults
         ...config,
-        ...options
+        // Only CLI options that were actually provided override config
+        ...(options.lockfile && { lockfilePath: options.lockfile }),
+        ...(options.output && { outputDir: options.output })
       };
 
       console.log(chalk.blue('🚀 Starting dependency fetch...'));
@@ -53,26 +59,32 @@ program
 program
   .command('publish')
   .description('Publish all packages to local registry (offline mode)')
-  .option('-c, --config <path>', 'Path to config file', './pnpm-airgap.config.json')
-  .option('-p, --packages <path>', 'Path to packages directory', './airgap-packages')
-  .option('-r, --registry <url>', 'Verdaccio registry URL', 'http://localhost:4873')
+  .option('-c, --config <path>', 'Path to config file')
+  .option('-p, --packages <path>', 'Path to packages directory')
+  .option('-r, --registry <url>', 'Verdaccio registry URL')
   .action(async (options) => {
     const publisher = require('../lib/offline-publisher');
 
     try {
       // Load config
+      const configPath = options.config || './pnpm-airgap.config.json';
       let config = {};
-      if (await fs.pathExists(options.config)) {
-        config = await fs.readJson(options.config);
+      if (await fs.pathExists(configPath)) {
+        config = await fs.readJson(configPath);
       }
 
-      // Merge CLI options with config
+      // Merge CLI options with config - smart defaults handling
       const finalConfig = {
-        packagesDir: options.packages,
-        registryUrl: options.registry,
+        // Base defaults
+        packagesDir: './airgap-packages',
+        registryUrl: 'http://localhost:4873',
         concurrency: 3,
+        skipExisting: true,
+        // Config file overrides defaults
         ...config,
-        ...options
+        // Only CLI options that were actually provided override config
+        ...(options.packages && { packagesDir: options.packages }),
+        ...(options.registry && { registryUrl: options.registry })
       };
 
       console.log(chalk.blue('🚀 Starting package publishing...'));
