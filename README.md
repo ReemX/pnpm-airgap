@@ -4,12 +4,12 @@
 
 ## The Problem
 
-Working with pnpm in secure, offline, or airgap environments is **broken**:
+Getting pnpm projects into secure, offline, or airgap environments is **broken**:
 
-- 🚫 **pnpm can't work offline** - Unlike npm, pnpm requires network access even after `pnpm install`
-- 🚫 **No existing solutions** - npm-based airgap tools don't understand pnpm's lockfile format
-- 🚫 **Manual workarounds are painful** - Extracting and publishing hundreds of packages manually is error-prone
-- 🚫 **Version conflicts** - pnpm's complex dependency resolution makes manual transfers nearly impossible
+- 🚫 **No tooling for pnpm lockfiles** - Existing airgap tools only work with npm's package-lock.json
+- 🚫 **Manual extraction is painful** - Identifying and downloading hundreds of packages from pnpm-lock.yaml by hand
+- 🚫 **Complex dependency trees** - pnpm's advanced resolution (peer deps, optionals, workspaces) makes manual approaches nearly impossible  
+- 🚫 **Registry population gap** - No automated way to populate offline registries with pnpm project dependencies
 
 **Real-world scenario**: You develop with pnpm online, then need to deploy to a secure network with no internet. Existing approaches have significant limitations:
 
@@ -32,7 +32,7 @@ Working with pnpm in secure, offline, or airgap environments is **broken**:
 ✅ **Enterprise-ready** - Handles real projects with 500+ dependencies and complex workspace setups  
 ✅ **Preserves pnpm benefits** - Maintains version resolution and dependency structure  
 
-**Purpose-built for the pnpm ecosystem.** While pnpm has offline capabilities, it requires packages to be pre-cached. pnpm-airgap bridges the online-to-offline gap by creating that cache from scratch.
+**Purpose-built for the pnpm ecosystem.** pnpm has excellent offline capabilities and actually works better offline than npm once packages are available. The challenge is **getting packages into your offline registry** - that's exactly what pnpm-airgap solves.
 
 ## Why This Workflow is Revolutionary
 
