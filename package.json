@@ -18,8 +18,16 @@
     "registry",
     "dependencies"
   ],
-  "author": "",
+  "author": "Reem Assaf reemasaf44@gmail.com",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ReemX/pnpm-airgap.git"
+  },
+  "homepage": "https://github.com/ReemX/pnpm-airgap?tab=readme-ov-file#pnpm-airgap",
+  "bugs": {
+    "url": "https://github.com/ReemX/pnpm-airgap/issues"
+  },
   "dependencies": {
     "chalk": "^4.1.2",
     "commander": "^11.0.0",

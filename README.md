@@ -1,6 +1,49 @@
 # pnpm-airgap
 
-Transfer pnpm project dependencies between online and offline environments with ease.
+**The only tool that solves pnpm offline/airgap deployment.**
+
+## The Problem
+
+Working with pnpm in secure, offline, or airgap environments is **broken**:
+
+- 🚫 **pnpm can't work offline** - Unlike npm, pnpm requires network access even after `pnpm install`
+- 🚫 **No existing solutions** - npm-based airgap tools don't understand pnpm's lockfile format
+- 🚫 **Manual workarounds are painful** - Extracting and publishing hundreds of packages manually is error-prone
+- 🚫 **Version conflicts** - pnpm's complex dependency resolution makes manual transfers nearly impossible
+
+**Real-world scenario**: You develop with pnpm online, then need to deploy to a secure network with no internet. Existing approaches have significant limitations:
+
+### Why Existing Solutions Fall Short:
+
+**`pnpm deploy`**: Only works for workspace packages, not full project dependencies  
+**`pnpm pack`**: Creates single package tarballs, not complete dependency trees  
+**npm-based airgap tools**: Don't understand pnpm's lockfile format or dependency resolution  
+**Manual approaches**: Copying `node_modules` fails (pnpm uses symlinks), tarball extraction misses peer dependencies  
+**Generic npm registry tools**: Require converting pnpm projects to npm, losing optimizations  
+
+## The Solution
+
+**pnpm-airgap fills the critical gap in pnpm tooling:**
+
+✅ **Complete dependency extraction** - Reads `pnpm-lock.yaml` and fetches ALL dependencies (supports v6-v9+)  
+✅ **Smart dependency resolution** - Handles peer deps, optional deps, and version conflicts like pnpm does  
+✅ **Universal registry support** - Works with Verdaccio, Nexus, Artifactory, and any npm-compatible registry  
+✅ **Zero-dependency bootstrap** - Can publish packages even when your offline registry is completely empty  
+✅ **Enterprise-ready** - Handles real projects with 500+ dependencies and complex workspace setups  
+✅ **Preserves pnpm benefits** - Maintains version resolution and dependency structure  
+
+**Purpose-built for the pnpm ecosystem.** While pnpm has offline capabilities, it requires packages to be pre-cached. pnpm-airgap bridges the online-to-offline gap by creating that cache from scratch.
+
+## Why This Workflow is Revolutionary
+
+**Seamless Online-to-Offline Transition**: Traditional airgap workflows are complex, error-prone, and require deep understanding of package management internals. pnpm-airgap creates a **single, simple workflow**:
+
+1. **Online**: `pnpm-airgap fetch` (one command extracts everything)
+2. **Transfer**: Copy one folder 
+3. **Offline**: `pnpm-airgap publish` (one command publishes everything)
+4. **Deploy**: `pnpm install` works normally
+
+**No workflow changes needed** - developers continue using pnpm normally, operations teams get reliable deployments, and security teams get full package visibility and control.
 
 ## Features
 
@@ -58,22 +101,34 @@ Transfer the `airgap-packages` directory to your offline machine via USB, networ
 
 ### Step 3: Offline Machine - Publish to Local Registry
 
-First, ensure Verdaccio is running:
+First, ensure your offline registry is running:
 ```bash
-# Install and start Verdaccio (if not already running)
-npm install -g verdaccio
-verdaccio
+# Verdaccio (lightweight, zero-config)
+npm install -g verdaccio && verdaccio
+
+# Or Nexus/Artifactory for enterprise environments
+# (follow your organization's setup guide)
 ```
 
-Authenticate with your local registry:
+Authenticate with your offline registry:
 ```bash
+# Verdaccio
 npm login --registry http://localhost:4873
+
+# Nexus example
+npm login --registry http://nexus.company.com:8081/repository/npm-group/
+
+# Artifactory example  
+npm login --registry https://artifactory.company.com/api/npm/npm-repo/
 ```
 
 Publish the packages:
 ```bash
+# Auto-detects registry from config or use explicit registry
 pnpm-airgap publish --packages ./airgap-packages --registry http://localhost:4873
 ```
+
+**🎯 Key Advantage**: This workflow seamlessly bridges online development with offline deployment, supporting any npm-compatible registry without requiring pnpm-specific configuration on the offline side.
 
 ### Step 4: Use Your Packages
 

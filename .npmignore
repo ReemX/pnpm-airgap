@@ -5,3 +5,4 @@ test/
 airgap-packages/
 *.tgz
 pnpm-airgap.config.json
+.claude
