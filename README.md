@@ -17,6 +17,27 @@ Transfer pnpm project dependencies between online and offline environments with 
 npm install -g pnpm-airgap
 ```
 
+### Bootstrap Installation (For Empty Registries)
+
+If your offline registry doesn't have the dependencies needed to install this package itself, you can use the dependency-free bootstrap publisher:
+
+1. **Extract this package tarball** to your offline machine:
+   ```bash
+   tar -xzf pnpm-airgap-1.0.0.tgz
+   cd package
+   ```
+
+2. **Use the bootstrap publisher** to publish packages with zero dependencies:
+   ```bash
+   # Method 1: Using the CLI command (recommended)
+   node bin/cli.js bootstrap --packages ./airgap-packages --registry http://localhost:4873
+   
+   # Method 2: Direct script execution
+   node lib/bootstrap-publisher.js ./airgap-packages http://localhost:4873
+   ```
+
+The bootstrap publisher uses only Node.js built-in modules and can publish packages even when your registry is completely empty.
+
 ## Quick Start
 
 ### Step 1: Online Machine - Fetch Dependencies
@@ -113,6 +134,19 @@ Publish all packages to local registry (offline mode).
 - `-p, --packages <path>` - Path to packages directory (default: `./airgap-packages`)
 - `-r, --registry <url>` - Verdaccio registry URL (default: `http://localhost:4873`)
 
+### `pnpm-airgap bootstrap`
+
+Publish packages without dependencies (for initial Verdaccio setup). This is ideal when your offline registry is empty and doesn't have the dependencies needed to install pnpm-airgap itself.
+
+**Options:**
+- `-p, --packages <path>` - Path to packages directory (default: `./airgap-packages`)
+- `-r, --registry <url>` - Verdaccio registry URL (default: `http://localhost:4873`)
+
+**Example:**
+```bash
+pnpm-airgap bootstrap --packages ./airgap-packages --registry http://localhost:4873
+```
+
 ### `pnpm-airgap init`
 
 Create a default configuration file.
@@ -123,6 +157,59 @@ Both commands generate detailed JSON reports:
 
 - **Fetch**: `bundle-info.json` - Download statistics and errors
 - **Publish**: `publish-report.json` - Publishing results for each package
+
+## Workflow Examples
+
+### Complete Airgap Transfer Workflow
+
+**Online Machine:**
+```bash
+# 1. Create configuration
+pnpm-airgap init
+
+# 2. Fetch all dependencies
+pnpm-airgap fetch
+
+# 3. Create tarball for transfer
+tar -czf airgap-transfer.tar.gz airgap-packages/ pnpm-airgap.config.json
+```
+
+**Offline Machine:**
+```bash
+# 1. Extract transferred files
+tar -xzf airgap-transfer.tar.gz
+
+# 2. Start Verdaccio (if not running)
+verdaccio &
+
+# 3. Login to registry
+npm login --registry http://localhost:4873
+
+# 4. Publish packages
+pnpm-airgap publish
+
+# 5. Configure project to use local registry
+echo "registry=http://localhost:4873" > .npmrc
+
+# 6. Install dependencies
+pnpm install
+```
+
+### Bootstrap Scenario (Empty Registry)
+
+If your offline registry doesn't have Node.js dependencies:
+
+```bash
+# Extract pnpm-airgap package manually
+tar -xzf pnpm-airgap-1.0.0.tgz
+cd package
+
+# Use bootstrap publisher with zero dependencies
+node bin/cli.js bootstrap --packages ../airgap-packages
+
+# Now you can install pnpm-airgap normally
+npm install -g pnpm-airgap
+```
 
 ## Troubleshooting
 
@@ -166,6 +253,35 @@ npm whoami --registry http://localhost:4873
     "concurrency": 5   // Adjust based on registry capacity
   }
 }
+```
+
+## Programmatic API
+
+You can also use pnpm-airgap programmatically in your Node.js applications:
+
+```javascript
+const { fetchDependencies, publishPackages } = require('pnpm-airgap');
+
+// Fetch dependencies
+const fetchConfig = {
+  lockfilePath: './pnpm-lock.yaml',
+  outputDir: './airgap-packages',
+  concurrency: 5,
+  registryUrl: 'https://registry.npmjs.org',
+  skipOptional: false
+};
+
+await fetchDependencies(fetchConfig);
+
+// Publish packages
+const publishConfig = {
+  packagesDir: './airgap-packages',
+  registryUrl: 'http://localhost:4873',
+  concurrency: 3,
+  skipExisting: true
+};
+
+await publishPackages(publishConfig);
 ```
 
 ## Compatibility
