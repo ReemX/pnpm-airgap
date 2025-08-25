@@ -72,10 +72,7 @@ If your offline registry doesn't have the dependencies needed to install this pa
 
 2. **Use the bootstrap publisher** to publish packages with zero dependencies:
    ```bash
-   # Method 1: Using the CLI command (recommended)
-   node bin/cli.js bootstrap --packages ./airgap-packages --registry http://localhost:4873
-   
-   # Method 2: Direct script execution
+   # Direct script execution (only method that works without dependencies)
    node lib/bootstrap-publisher.js ./airgap-packages http://localhost:4873
    ```
 
