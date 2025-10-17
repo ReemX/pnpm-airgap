@@ -4,6 +4,7 @@ const path = require('path');
 const fs = require('fs-extra');
 const chalk = require('chalk');
 const packageJson = require('../package.json');
+const { DEFAULT_CONFIG } = require('../lib/constants');
 
 program
   .name('pnpm-airgap')
@@ -29,12 +30,8 @@ program
 
       // Merge CLI options with config - smart defaults handling
       const finalConfig = {
-        // Base defaults
-        lockfilePath: './pnpm-lock.yaml',
-        outputDir: './airgap-packages',
-        concurrency: 5,
-        registryUrl: 'https://registry.npmjs.org',
-        skipOptional: false,
+        // Base defaults from constants
+        ...DEFAULT_CONFIG.fetch,
         // Config file overrides defaults (use fetch section)
         ...(config.fetch || {}),
         // Only CLI options that were actually provided override config
@@ -75,11 +72,8 @@ program
 
       // Merge CLI options with config - smart defaults handling
       const finalConfig = {
-        // Base defaults
-        packagesDir: './airgap-packages',
-        registryUrl: 'http://localhost:4873',
-        concurrency: 3,
-        skipExisting: true,
+        // Base defaults from constants
+        ...DEFAULT_CONFIG.publish,
         // Config file overrides defaults (use publish section)
         ...(config.publish || {}),
         // Only CLI options that were actually provided override config
@@ -131,22 +125,6 @@ program
   .command('init')
   .description('Create a default configuration file')
   .action(async () => {
-    const defaultConfig = {
-      fetch: {
-        lockfilePath: './pnpm-lock.yaml',
-        outputDir: './airgap-packages',
-        concurrency: 5,
-        registryUrl: 'https://registry.npmjs.org',
-        skipOptional: false
-      },
-      publish: {
-        packagesDir: './airgap-packages',
-        registryUrl: 'http://localhost:4873',
-        concurrency: 3,
-        skipExisting: true
-      }
-    };
-
     const configPath = './pnpm-airgap.config.json';
 
     if (await fs.pathExists(configPath)) {
@@ -154,7 +132,7 @@ program
       return;
     }
 
-    await fs.writeJson(configPath, defaultConfig, { spaces: 2 });
+    await fs.writeJson(configPath, DEFAULT_CONFIG, { spaces: 2 });
     console.log(chalk.green('✅ Created pnpm-airgap.config.json'));
   });
 
