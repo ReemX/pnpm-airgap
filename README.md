@@ -71,7 +71,7 @@ If your offline registry doesn't have the dependencies needed to install this pa
 
 1. **Extract this package tarball** to your offline machine:
    ```bash
-   tar -xzf pnpm-airgap-1.3.0.tgz
+   tar -xzf pnpm-airgap-1.5.0.tgz
    cd package
    ```
 
@@ -258,7 +258,7 @@ If your offline registry doesn't have Node.js dependencies:
 
 ```bash
 # Extract pnpm-airgap package manually
-tar -xzf pnpm-airgap-1.3.0.tgz
+tar -xzf pnpm-airgap-1.5.0.tgz
 cd package
 
 # Use bootstrap publisher with zero dependencies
@@ -355,7 +355,12 @@ await publishPackages(publishConfig);
 - **npm**: For authentication and publishing
 - **Platforms**: Windows, Linux, macOS (cross-platform tar support)
 
-## Recent Improvements (v1.3.0)
+## Recent Improvements (v1.5.0)
+
+### Bug Fixes
+- **Fixed publish tag override**: Always explicitly specify `--tag` when publishing to override `publishConfig.tag` in package.json. This fixes an issue where packages like pnpm (which have `publishConfig.tag: 'next-10'`) would be published with the wrong tag instead of `latest`.
+
+## Previous Improvements (v1.3.0 - v1.4.0)
 
 ### Performance Enhancements
 - **Package info caching**: Pre-check phase now caches extracted package info, eliminating redundant tarball extraction during publishing (~30% performance improvement)
