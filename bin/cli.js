@@ -19,6 +19,7 @@ program
   .option('-l, --lockfile <path>', 'Path to pnpm-lock.yaml')
   .option('-o, --output <path>', 'Output directory for packages')
   .option('-r, --registry <url>', 'Source registry URL (default: https://registry.npmjs.org)')
+  .option('--registry-state <path>', 'Registry state file to diff against (only fetch missing packages)')
   .option('--skip-optional', 'Skip optional dependencies')
   .option('--concurrency <number>', 'Number of concurrent downloads', parseInt)
   .option('--debug', 'Enable debug output')
@@ -40,6 +41,7 @@ program
         ...(options.lockfile && { lockfilePath: options.lockfile }),
         ...(options.output && { outputDir: options.output }),
         ...(options.registry && { registryUrl: options.registry }),
+        ...(options.registryState && { registryStatePath: options.registryState }),
         ...(options.skipOptional && { skipOptional: true }),
         ...(options.concurrency && { concurrency: options.concurrency }),
         ...(options.debug && { debug: true })
@@ -56,6 +58,10 @@ program
       console.log(chalk.gray(`Lockfile: ${finalConfig.lockfilePath}`));
       console.log(chalk.gray(`Output: ${finalConfig.outputDir}`));
       console.log(chalk.gray(`Registry: ${finalConfig.registryUrl}`));
+      if (finalConfig.registryStatePath) {
+        console.log(chalk.gray(`Registry state: ${finalConfig.registryStatePath}`));
+        console.log(chalk.cyan('Mode: Incremental (only fetching missing packages)'));
+      }
       if (finalConfig.skipOptional) {
         console.log(chalk.gray('Skipping optional dependencies'));
       }
@@ -367,6 +373,72 @@ program
       console.log();
     } catch (error) {
       console.error(chalk.red('❌ Error:'), error.message);
+      process.exit(1);
+    }
+  });
+
+// Registry State command with subcommands
+const registryStateCmd = program
+  .command('registry-state')
+  .description('Export and manage registry state for incremental syncing');
+
+registryStateCmd
+  .command('export')
+  .description('Export all packages and versions from a registry')
+  .option('-c, --config <path>', 'Path to config file')
+  .option('-r, --registry <url>', 'Registry URL to export from')
+  .option('-o, --output <path>', 'Output file path')
+  .option('-s, --scope <scope>', 'Only export packages in this scope (e.g., @mycompany)')
+  .option('--concurrency <number>', 'Number of concurrent operations', parseInt)
+  .option('--debug', 'Enable debug output')
+  .action(async (options) => {
+    const { exportRegistryState } = require('../lib/registry-state');
+
+    try {
+      // Load config file
+      const configPath = options.config || './pnpm-airgap.config.json';
+      let config = {};
+      if (await fs.pathExists(configPath)) {
+        config = await fs.readJson(configPath);
+      }
+
+      // Merge: defaults < config file < CLI options
+      const finalConfig = {
+        ...DEFAULT_CONFIG.registryState,
+        ...(config.registryState || {}),
+        ...(options.registry && { registryUrl: options.registry }),
+        ...(options.output && { outputPath: options.output }),
+        ...(options.scope && { scope: options.scope }),
+        ...(options.concurrency && { concurrency: options.concurrency }),
+        ...(options.debug && { debug: true })
+      };
+
+      // Validate registry URL
+      if (!finalConfig.registryUrl) {
+        console.error(chalk.red('Registry URL is required'));
+        console.error(chalk.gray('Use -r/--registry or set registryState.registryUrl in config file'));
+        process.exit(1);
+      }
+      if (!isValidUrl(finalConfig.registryUrl)) {
+        console.error(chalk.red(`Invalid registry URL: ${finalConfig.registryUrl}`));
+        console.error(chalk.gray('URL must start with http:// or https://'));
+        process.exit(1);
+      }
+
+      const result = await exportRegistryState(finalConfig);
+
+      if (result.success) {
+        console.log(chalk.green('\n✅ Registry state export completed successfully!'));
+      } else {
+        console.log(chalk.yellow(`\n⚠️  Export completed with some errors`));
+      }
+
+      process.exit(result.success ? 0 : 1);
+    } catch (error) {
+      console.error(chalk.red('❌ Error:'), error.message);
+      if (options.debug) {
+        console.error(error.stack);
+      }
       process.exit(1);
     }
   });

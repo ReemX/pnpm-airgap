@@ -58,6 +58,7 @@ Getting pnpm projects into secure, offline, or airgap environments is **broken**
 - 🔄 **Version conflict resolution** - Handles older version publishing with automatic tagging
 - 🎨 **Enhanced Windows support** - Multiple tar extraction patterns for cross-platform compatibility
 - 📦 **Memory-efficient** - 1MB limit on package.json extraction to prevent memory issues
+- 🔍 **Incremental sync** - Export registry state and fetch only missing packages (huge bandwidth savings)
 
 ## Installation
 
@@ -71,7 +72,7 @@ If your offline registry doesn't have the dependencies needed to install this pa
 
 1. **Extract this package tarball** to your offline machine:
    ```bash
-   tar -xzf pnpm-airgap-1.5.0.tgz
+   tar -xzf pnpm-airgap-1.6.0.tgz
    cd package
    ```
 
@@ -160,6 +161,7 @@ This creates `pnpm-airgap.config.json`:
     "outputDir": "./airgap-packages",
     "concurrency": 5,
     "registryUrl": "https://registry.npmjs.org",
+    "registryStatePath": null,
     "skipOptional": false
   },
   "publish": {
@@ -167,6 +169,11 @@ This creates `pnpm-airgap.config.json`:
     "registryUrl": "http://localhost:4873",
     "concurrency": 3,
     "skipExisting": true
+  },
+  "registryState": {
+    "registryUrl": "http://localhost:4873",
+    "outputPath": "./registry-state.json",
+    "concurrency": 10
   }
 }
 ```
@@ -181,6 +188,7 @@ Fetch all dependencies from pnpm lockfile (online mode).
 - `-c, --config <path>` - Path to config file (default: `./pnpm-airgap.config.json`)
 - `-l, --lockfile <path>` - Path to pnpm-lock.yaml (default: `./pnpm-lock.yaml`)
 - `-o, --output <path>` - Output directory for packages (default: `./airgap-packages`)
+- `--registry-state <path>` - Registry state file for incremental fetching (only fetch missing packages)
 
 ### `pnpm-airgap publish`
 
@@ -207,6 +215,23 @@ pnpm-airgap bootstrap --packages ./airgap-packages --registry http://localhost:4
 ### `pnpm-airgap init`
 
 Create a default configuration file.
+
+### `pnpm-airgap registry-state export`
+
+Export the complete state (all packages and versions) from a registry. This is used for incremental fetching - export from your airgapped registry, then use the state file to fetch only missing packages.
+
+**Options:**
+- `-c, --config <path>` - Path to config file (default: `./pnpm-airgap.config.json`)
+- `-r, --registry <url>` - Registry URL to export from (default: `http://localhost:4873`)
+- `-o, --output <path>` - Output file path (default: `./registry-state.json`)
+- `-s, --scope <scope>` - Only export packages in this scope (e.g., `@mycompany`)
+- `--concurrency <number>` - Number of concurrent operations (default: `10`)
+
+**Example:**
+```bash
+# Export registry state from airgapped Verdaccio
+pnpm-airgap registry-state export -r http://verdaccio:4873 -o registry-state.json
+```
 
 ## Reports
 
@@ -252,13 +277,35 @@ echo "registry=http://localhost:4873" > .npmrc
 pnpm install
 ```
 
+### Incremental Sync Workflow (Bandwidth Optimization)
+
+When you need to transfer packages for multiple projects over time, avoid re-downloading packages that already exist in your airgapped registry:
+
+**On Airgapped Network (once, or periodically):**
+```bash
+# Export current registry state
+pnpm-airgap registry-state export -r http://verdaccio:4873 -o registry-state.json
+
+# Transfer registry-state.json to online network
+```
+
+**On Online Network:**
+```bash
+# Fetch only packages missing from your airgapped registry
+pnpm-airgap fetch -l pnpm-lock.yaml --registry-state registry-state.json -o ./packages
+
+# Only missing packages are downloaded - huge bandwidth savings!
+```
+
+**Result**: If your lockfile needs 500 packages but 450 already exist in your airgapped registry, only 50 packages are downloaded instead of 500.
+
 ### Bootstrap Scenario (Empty Registry)
 
 If your offline registry doesn't have Node.js dependencies:
 
 ```bash
 # Extract pnpm-airgap package manually
-tar -xzf pnpm-airgap-1.5.0.tgz
+tar -xzf pnpm-airgap-1.6.0.tgz
 cd package
 
 # Use bootstrap publisher with zero dependencies
@@ -355,7 +402,19 @@ await publishPackages(publishConfig);
 - **npm**: For authentication and publishing
 - **Platforms**: Windows, Linux, macOS (cross-platform tar support)
 
-## Recent Improvements (v1.5.0)
+## Recent Improvements (v1.6.0)
+
+### New Feature: Incremental Sync
+- **Registry state export**: New `registry-state export` command exports all packages and versions from your airgapped registry
+- **Diff-based fetching**: New `--registry-state` option for `fetch` command compares lockfile against registry state and only downloads missing packages
+- **Bandwidth optimization**: Dramatically reduces transfer size when syncing multiple projects - only new/missing packages are fetched
+- **Full version tracking**: Registry state tracks ALL versions of each package, ensuring exact lockfile compatibility
+
+### Configuration
+- Added `registryState` section to config file for export settings
+- Added `fetch.registryStatePath` for persistent incremental fetch configuration
+
+## Previous Improvements (v1.5.0)
 
 ### Bug Fixes
 - **Fixed publish tag override**: Always explicitly specify `--tag` when publishing to override `publishConfig.tag` in package.json. This fixes an issue where packages like pnpm (which have `publishConfig.tag: 'next-10'`) would be published with the wrong tag instead of `latest`.
