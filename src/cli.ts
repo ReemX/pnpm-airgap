@@ -265,12 +265,13 @@ program
   });
 
 // Helper to load config file
-async function loadConfig(configPath?: string): Promise<Record<string, unknown>> {
-  const path = configPath || './pnpm-airgap.config.json';
-  if (await fs.pathExists(path)) {
-    return fs.readJson(path);
+async function loadConfig(configPath?: string): Promise<typeof DEFAULT_CONFIG> {
+  const configFile = configPath || './pnpm-airgap.config.json';
+  if (await fs.pathExists(configFile)) {
+    const loaded = await fs.readJson(configFile);
+    return { ...DEFAULT_CONFIG, ...loaded };
   }
-  return {};
+  return { ...DEFAULT_CONFIG };
 }
 
 // If no arguments provided, run interactive mode

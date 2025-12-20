@@ -82,7 +82,47 @@ export const BLOCKED_REGISTRIES = [
 export const VERSION_TAG_PREFIX = 'legacy';
 
 // Default configuration for all commands
-export const DEFAULT_CONFIG = {
+export const DEFAULT_CONFIG: {
+  fetch: {
+    lockfilePath: string;
+    outputDir: string;
+    concurrency: number;
+    registryUrl: string;
+    registryStatePath: string | null;
+    skipOptional: boolean;
+    debug: boolean;
+  };
+  publish: {
+    packagesDir: string;
+    registryUrl: string;
+    concurrency: number;
+    skipExisting: boolean;
+    dryRun: boolean;
+    debug: boolean;
+  };
+  sync: {
+    sourceRegistry: string;
+    destRegistry: string;
+    outputDir: string;
+    scope: string | null;
+    packageList: string | null;
+    maxVersions: number | null;
+    sinceDate: string | null;
+    concurrency: number;
+    skipExisting: boolean;
+    downloadOnly: boolean;
+    publishOnly: boolean;
+    dryRun: boolean;
+    debug: boolean;
+  };
+  registryState: {
+    registryUrl: string;
+    outputPath: string;
+    scope: string | null;
+    concurrency: number;
+    debug: boolean;
+  };
+} = {
   fetch: {
     lockfilePath: './pnpm-lock.yaml',
     outputDir: './airgap-packages',
@@ -122,4 +162,4 @@ export const DEFAULT_CONFIG = {
     concurrency: 10,
     debug: false,
   },
-} as const;
+};

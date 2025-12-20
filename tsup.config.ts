@@ -1,4 +1,7 @@
 import { defineConfig } from 'tsup';
+import { readFileSync } from 'fs';
+
+const pkg = JSON.parse(readFileSync('./package.json', 'utf-8'));
 
 export default defineConfig([
   // Library build (for npm package consumers)
@@ -22,7 +25,7 @@ export default defineConfig([
     splitting: false,
     noExternal: [/.*/], // Bundle ALL dependencies
     define: {
-      'process.env.npm_package_version': '"2.0.0"',
+      'process.env.npm_package_version': JSON.stringify(pkg.version),
     },
     banner: {
       js: '#!/usr/bin/env node',

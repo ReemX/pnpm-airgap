@@ -43,14 +43,23 @@ async function saveConfig(): Promise<void> {
   }
 }
 
-// Styled banner
-const BANNER = `
+// Version is injected at build time via tsup define
+const VERSION = process.env.npm_package_version || '2.1.0';
+
+// Styled banner (dynamically padded based on version length)
+function getBanner(): string {
+  const versionStr = `v${VERSION}`;
+  const line1Content = `pnpm-airgap ${versionStr}`;
+  const line1Padding = ' '.repeat(Math.max(0, 27 - line1Content.length));
+
+  return `
 ${chalk.bold.cyan('┌─────────────────────────────────────────┐')}
-${chalk.bold.cyan('│')}  ${chalk.bold.white('pnpm-airgap')} ${chalk.gray('v2.0.0')}                     ${chalk.bold.cyan('│')}
+${chalk.bold.cyan('│')}  ${chalk.bold.white('pnpm-airgap')} ${chalk.gray(versionStr)}${line1Padding}${chalk.bold.cyan('│')}
 ${chalk.bold.cyan('│')}  ${chalk.gray('Transfer dependencies to air-gapped')}    ${chalk.bold.cyan('│')}
 ${chalk.bold.cyan('│')}  ${chalk.gray('environments with ease')}                 ${chalk.bold.cyan('│')}
 ${chalk.bold.cyan('└─────────────────────────────────────────┘')}
 `;
+}
 
 // Theme for prompts
 const theme = {
@@ -118,7 +127,7 @@ async function countTarballs(dir: string): Promise<number> {
  */
 async function interactiveFetch(): Promise<void> {
   console.clear();
-  console.log(BANNER);
+  console.log(getBanner());
   console.log(chalk.bold('📦 Fetch Dependencies\n'));
 
   const detectedLockfile = await detectLockfile();
@@ -225,7 +234,7 @@ async function interactiveFetch(): Promise<void> {
  */
 async function interactivePublish(): Promise<void> {
   console.clear();
-  console.log(BANNER);
+  console.log(getBanner());
   console.log(chalk.bold('📤 Publish Packages\n'));
 
   const detectedDir = await detectPackagesDir();
@@ -336,7 +345,7 @@ async function interactivePublish(): Promise<void> {
  */
 async function interactiveSync(): Promise<void> {
   console.clear();
-  console.log(BANNER);
+  console.log(getBanner());
   console.log(chalk.bold('🔄 Sync Registries\n'));
 
   const mode = await select({
@@ -478,7 +487,7 @@ async function interactiveSync(): Promise<void> {
  */
 async function interactiveRegistryState(): Promise<void> {
   console.clear();
-  console.log(BANNER);
+  console.log(getBanner());
   console.log(chalk.bold('📊 Export Registry State\n'));
 
   const registryUrl = await input({
@@ -535,9 +544,9 @@ async function interactiveRegistryState(): Promise<void> {
 /**
  * Show quick start guide
  */
-function showQuickStart(): void {
+async function showQuickStart(): Promise<void> {
   console.clear();
-  console.log(BANNER);
+  console.log(getBanner());
   console.log(chalk.bold('📖 Quick Start Guide\n'));
 
   console.log(chalk.cyan('Typical workflow:'));
@@ -560,8 +569,12 @@ function showQuickStart(): void {
   console.log(chalk.white('   Use the local registry:'));
   console.log(chalk.gray('   $ pnpm install --registry http://localhost:4873'));
 
-  console.log(chalk.gray('\n─────────────────────────────────────────'));
-  console.log(chalk.gray('Press Enter to continue...\n'));
+  console.log(chalk.gray('\n─────────────────────────────────────────\n'));
+
+  await input({
+    message: 'Press Enter to continue...',
+    theme,
+  });
 }
 
 /**
@@ -571,72 +584,82 @@ export async function runInteractiveMode(): Promise<void> {
   // Load config once at start
   await loadConfig();
 
-  console.clear();
-  console.log(BANNER);
+  let running = true;
 
-  const action = await select({
-    message: 'What would you like to do?',
-    choices: [
-      {
-        name: `${chalk.cyan('📦')} Fetch dependencies from lockfile`,
-        value: 'fetch',
-        description: 'Download packages for offline transfer'
-      },
-      {
-        name: `${chalk.cyan('📤')} Publish packages to registry`,
-        value: 'publish',
-        description: 'Publish tarballs to local registry'
-      },
-      {
-        name: `${chalk.cyan('🔄')} Sync registries`,
-        value: 'sync',
-        description: 'Copy packages between registries'
-      },
-      {
-        name: `${chalk.cyan('📊')} Export registry state`,
-        value: 'registry-state',
-        description: 'Export for incremental syncing'
-      },
-      {
-        name: `${chalk.cyan('📖')} Quick start guide`,
-        value: 'help',
-        description: 'Learn how to use this tool'
-      },
-      {
-        name: `${chalk.gray('✖')} Exit`,
-        value: 'exit',
-      },
-    ],
-    theme,
-  });
+  while (running) {
+    console.clear();
+    console.log(getBanner());
 
-  try {
-    switch (action) {
-      case 'fetch':
-        await interactiveFetch();
-        break;
-      case 'publish':
-        await interactivePublish();
-        break;
-      case 'sync':
-        await interactiveSync();
-        break;
-      case 'registry-state':
-        await interactiveRegistryState();
-        break;
-      case 'help':
-        showQuickStart();
-        await runInteractiveMode(); // Return to menu
-        break;
-      case 'exit':
-        console.log(chalk.gray('\nGoodbye!\n'));
-        break;
-    }
-  } catch (error) {
-    if ((error as Error).name === 'ExitPromptError') {
-      console.log(chalk.gray('\nCancelled.\n'));
-    } else {
-      throw error;
+    try {
+      const action = await select({
+        message: 'What would you like to do?',
+        choices: [
+          {
+            name: `${chalk.cyan('📦')} Fetch dependencies from lockfile`,
+            value: 'fetch',
+            description: 'Download packages for offline transfer',
+          },
+          {
+            name: `${chalk.cyan('📤')} Publish packages to registry`,
+            value: 'publish',
+            description: 'Publish tarballs to local registry',
+          },
+          {
+            name: `${chalk.cyan('🔄')} Sync registries`,
+            value: 'sync',
+            description: 'Copy packages between registries',
+          },
+          {
+            name: `${chalk.cyan('📊')} Export registry state`,
+            value: 'registry-state',
+            description: 'Export for incremental syncing',
+          },
+          {
+            name: `${chalk.cyan('📖')} Quick start guide`,
+            value: 'help',
+            description: 'Learn how to use this tool',
+          },
+          {
+            name: `${chalk.gray('✖')} Exit`,
+            value: 'exit',
+          },
+        ],
+        theme,
+      });
+
+      switch (action) {
+        case 'fetch':
+          await interactiveFetch();
+          running = false;
+          break;
+        case 'publish':
+          await interactivePublish();
+          running = false;
+          break;
+        case 'sync':
+          await interactiveSync();
+          running = false;
+          break;
+        case 'registry-state':
+          await interactiveRegistryState();
+          running = false;
+          break;
+        case 'help':
+          await showQuickStart();
+          // Loop continues, shows menu again
+          break;
+        case 'exit':
+          console.log(chalk.gray('\nGoodbye!\n'));
+          running = false;
+          break;
+      }
+    } catch (error) {
+      if ((error as Error).name === 'ExitPromptError') {
+        console.log(chalk.gray('\nCancelled.\n'));
+        running = false;
+      } else {
+        throw error;
+      }
     }
   }
 }
