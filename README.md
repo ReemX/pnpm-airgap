@@ -74,11 +74,11 @@ node cli.cjs
 ```
 
 ```
-┌─────────────────────────────────────────┐
-│  pnpm-airgap v2.0.0                     │
-│  Transfer dependencies to air-gapped    │
-│  environments with ease                 │
-└─────────────────────────────────────────┘
+┌───────────────────────────────────────┐
+│  pnpm-airgap v2.0.0                   │
+│  Transfer dependencies to air-gapped  │
+│  environments with ease               │
+└───────────────────────────────────────┘
 
 ? What would you like to do?
   ❯ 📦 Fetch dependencies from lockfile
@@ -188,22 +188,23 @@ Create `pnpm-airgap.config.json`:
 
 ## Features
 
-| Feature | Description |
-|---------|-------------|
+| Feature               | Description                                                       |
+| --------------------- | ----------------------------------------------------------------- |
 | **Standalone Binary** | Single 1.1MB file, runs with just Node.js - no npm install needed |
-| **Interactive Mode** | Guided wizard for all commands |
-| **Auto-detection** | Finds lockfiles and package directories automatically |
-| **Incremental Sync** | Export registry state to skip already-synced packages |
-| **Smart Tagging** | Auto-detects prerelease tags, handles version conflicts |
-| **Safety Blocks** | Prevents accidental publish to public registries (npmjs.org) |
-| **Rate Limiting** | Automatic backoff for 429 errors |
-| **Robust Parsing** | Handles scoped packages, aliases, patches, peer deps |
+| **Interactive Mode**  | Guided wizard for all commands                                    |
+| **Auto-detection**    | Finds lockfiles and package directories automatically             |
+| **Incremental Sync**  | Export registry state to skip already-synced packages             |
+| **Smart Tagging**     | Auto-detects prerelease tags, handles version conflicts           |
+| **Safety Blocks**     | Prevents accidental publish to public registries (npmjs.org)      |
+| **Rate Limiting**     | Automatic backoff for 429 errors                                  |
+| **Robust Parsing**    | Handles scoped packages, aliases, patches, peer deps              |
 
 ## Workflow Examples
 
 ### Complete Airgap Transfer
 
 **Online Machine:**
+
 ```bash
 # Fetch all dependencies
 node cli.cjs fetch -l pnpm-lock.yaml -o ./packages
@@ -213,6 +214,7 @@ tar -czf transfer.tar.gz packages/ cli.cjs
 ```
 
 **Offline Machine:**
+
 ```bash
 # Extract
 tar -xzf transfer.tar.gz
@@ -268,12 +270,12 @@ await publishPackages({
 
 ## Compatibility
 
-| Component | Supported Versions |
-|-----------|-------------------|
-| **Node.js** | 18.0.0 or higher |
-| **pnpm lockfile** | v5, v6, v9 |
-| **Registries** | Verdaccio, Nexus, Artifactory, any npm-compatible |
-| **Platforms** | Windows, Linux, macOS |
+| Component         | Supported Versions                                |
+| ----------------- | ------------------------------------------------- |
+| **Node.js**       | 18.0.0 or higher                                  |
+| **pnpm lockfile** | v5, v6, v9                                        |
+| **Registries**    | Verdaccio, Nexus, Artifactory, any npm-compatible |
+| **Platforms**     | Windows, Linux, macOS                             |
 
 ## Reports
 
@@ -302,6 +304,7 @@ Check `bundle-info.json` for download failures and ensure lockfile is current.
 ### Publishing Conflicts
 
 The tool automatically handles:
+
 - Version conflicts (uses version-specific tags)
 - Prerelease versions (applies correct tags)
 - Already-existing packages (skips by default)

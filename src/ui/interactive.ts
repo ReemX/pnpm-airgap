@@ -15,7 +15,7 @@ import { DEFAULTS } from '../constants.js';
 // Styled banner
 const BANNER = `
 ${chalk.bold.cyan('┌─────────────────────────────────────────┐')}
-${chalk.bold.cyan('│')}  ${chalk.bold.white('pnpm-airgap')} ${chalk.gray('v2.0.0')}                   ${chalk.bold.cyan('│')}
+${chalk.bold.cyan('│')}  ${chalk.bold.white('pnpm-airgap')} ${chalk.gray('v2.0.0')}                     ${chalk.bold.cyan('│')}
 ${chalk.bold.cyan('│')}  ${chalk.gray('Transfer dependencies to air-gapped')}    ${chalk.bold.cyan('│')}
 ${chalk.bold.cyan('│')}  ${chalk.gray('environments with ease')}                 ${chalk.bold.cyan('│')}
 ${chalk.bold.cyan('└─────────────────────────────────────────┘')}
