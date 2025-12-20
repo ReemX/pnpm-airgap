@@ -1,158 +1,166 @@
 # pnpm-airgap
 
-**The only tool that solves pnpm offline/airgap deployment.**
+**The complete solution for transferring pnpm dependencies to air-gapped environments.**
 
 ## The Problem
 
-Getting pnpm projects into secure, offline, or airgap environments is **broken**:
+Getting pnpm projects into secure, offline, or air-gapped environments is challenging:
 
-- 🚫 **No tooling for pnpm lockfiles** - Existing airgap tools only work with npm's package-lock.json
-- 🚫 **Manual extraction is painful** - Identifying and downloading hundreds of packages from pnpm-lock.yaml by hand
-- 🚫 **Complex dependency trees** - pnpm's advanced resolution (peer deps, optionals, workspaces) makes manual approaches nearly impossible  
-- 🚫 **Registry population gap** - No automated way to populate offline registries with pnpm project dependencies
-
-**Real-world scenario**: You develop with pnpm online, then need to deploy to a secure network with no internet. Existing approaches have significant limitations:
-
-### Why Existing Solutions Fall Short:
-
-**`pnpm deploy`**: Only works for workspace packages, not full project dependencies  
-**`pnpm pack`**: Creates single package tarballs, not complete dependency trees  
-**npm-based airgap tools**: Don't understand pnpm's lockfile format or dependency resolution  
-**Manual approaches**: Copying `node_modules` fails (pnpm uses symlinks), tarball extraction misses peer dependencies  
-**Generic npm registry tools**: Require converting pnpm projects to npm, losing optimizations  
+- **No tooling for pnpm lockfiles** - Existing airgap tools only work with npm's package-lock.json
+- **Complex dependency trees** - pnpm's advanced resolution (peer deps, optionals, workspaces) makes manual approaches nearly impossible
+- **Registry population gap** - No automated way to populate offline registries with pnpm project dependencies
 
 ## The Solution
 
-**pnpm-airgap fills the critical gap in pnpm tooling:**
+**pnpm-airgap** is a standalone tool that:
 
-✅ **Complete dependency extraction** - Reads `pnpm-lock.yaml` and fetches ALL dependencies (supports v6-v9+)  
-✅ **Smart dependency resolution** - Handles peer deps, optional deps, and version conflicts like pnpm does  
-✅ **Universal registry support** - Works with Verdaccio, Nexus, Artifactory, and any npm-compatible registry  
-✅ **Zero-dependency bootstrap** - Can publish packages even when your offline registry is completely empty  
-✅ **Enterprise-ready** - Handles real projects with 500+ dependencies and complex workspace setups  
-✅ **Preserves pnpm benefits** - Maintains version resolution and dependency structure  
-
-**Purpose-built for the pnpm ecosystem.** pnpm has excellent offline capabilities and actually works better offline than npm once packages are available. The challenge is **getting packages into your offline registry** - that's exactly what pnpm-airgap solves.
-
-## Why This Workflow is Revolutionary
-
-**Seamless Online-to-Offline Transition**: Traditional airgap workflows are complex, error-prone, and require deep understanding of package management internals. pnpm-airgap creates a **single, simple workflow**:
-
-1. **Online**: `pnpm-airgap fetch` (one command extracts everything)
-2. **Transfer**: Copy one folder 
-3. **Offline**: `pnpm-airgap publish` (one command publishes everything)
-4. **Deploy**: `pnpm install` works normally
-
-**No workflow changes needed** - developers continue using pnpm normally, operations teams get reliable deployments, and security teams get full package visibility and control.
-
-## Features
-
-- 🚀 **Fast parallel downloads** - Configurable concurrency for optimal speed
-- 📦 **Support for pnpm v6-v9+** - Compatible with all modern lockfile formats
-- 🔐 **Secure authentication** - Uses standard npm credentials
-- 🎯 **Multiple versions support** - Handles different versions of the same package
-- 📊 **Detailed reporting** - Track success, failures, and skipped packages
-- 🛡️ **Robust error handling** - Continues on individual failures
-- ⚡ **Smart caching** - Pre-check optimization avoids redundant package info extraction
-- 🏷️ **Automatic prerelease tags** - Detects and applies appropriate tags (beta, alpha, rc, etc.)
-- 🔄 **Version conflict resolution** - Handles older version publishing with automatic tagging
-- 🎨 **Enhanced Windows support** - Multiple tar extraction patterns for cross-platform compatibility
-- 📦 **Memory-efficient** - 1MB limit on package.json extraction to prevent memory issues
-- 🔍 **Incremental sync** - Export registry state and fetch only missing packages (huge bandwidth savings)
-
-## Installation
-
-```bash
-npm install -g pnpm-airgap
-```
-
-### Bootstrap Installation (For Empty Registries)
-
-If your offline registry doesn't have the dependencies needed to install this package itself, you can use the dependency-free bootstrap publisher:
-
-1. **Extract this package tarball** to your offline machine:
-   ```bash
-   tar -xzf pnpm-airgap-1.6.0.tgz
-   cd package
-   ```
-
-2. **Use the bootstrap publisher** to publish packages with zero dependencies:
-   ```bash
-   # Direct script execution (only method that works without dependencies)
-   node lib/bootstrap-publisher.js ./airgap-packages http://localhost:4873
-   ```
-
-The bootstrap publisher uses only Node.js built-in modules and can publish packages even when your registry is completely empty. It features smart pre-checking to avoid redundant processing and caches package info for optimal performance.
+- Reads `pnpm-lock.yaml` and downloads ALL dependencies
+- Publishes packages to any npm-compatible registry (Verdaccio, Nexus, Artifactory)
+- Works as a single file - no `npm install` required in airgap
+- Supports pnpm lockfile versions 5.x, 6.x, and 9.x
 
 ## Quick Start
 
-### Step 1: Online Machine - Fetch Dependencies
+### 1. Download the standalone CLI
+
+The CLI is a single file (~1.1MB) that runs with just Node.js:
 
 ```bash
-# In your project directory with pnpm-lock.yaml
-pnpm-airgap fetch
+# From npm (online)
+npm pack pnpm-airgap
+tar -xzf pnpm-airgap-*.tgz
+# Use: node package/dist/cli.cjs
 
-# Or specify custom paths
-pnpm-airgap fetch --lockfile ./pnpm-lock.yaml --output ./packages
+# Or build from source
+pnpm install && pnpm build
+# Use: node dist/cli.cjs
 ```
 
-This creates an `airgap-packages` directory with all dependencies.
+### 2. Fetch dependencies (online)
 
-### Step 2: Transfer
-
-Transfer the `airgap-packages` directory to your offline machine via USB, network share, etc.
-
-### Step 3: Offline Machine - Publish to Local Registry
-
-First, ensure your offline registry is running:
 ```bash
-# Verdaccio (lightweight, zero-config)
-npm install -g verdaccio && verdaccio
-
-# Or Nexus/Artifactory for enterprise environments
-# (follow your organization's setup guide)
+node cli.cjs fetch -l ./pnpm-lock.yaml -o ./packages
 ```
 
-Authenticate with your offline registry:
+### 3. Transfer to airgap
+
+Copy the `packages` folder and `cli.cjs` to your air-gapped environment.
+
+### 4. Publish to local registry (airgap)
+
 ```bash
-# Verdaccio
+# Start your registry (e.g., Verdaccio)
+verdaccio &
+
+# Login
 npm login --registry http://localhost:4873
 
-# Nexus example
-npm login --registry http://nexus.company.com:8081/repository/npm-group/
-
-# Artifactory example  
-npm login --registry https://artifactory.company.com/api/npm/npm-repo/
+# Publish all packages
+node cli.cjs publish -p ./packages -r http://localhost:4873
 ```
 
-Publish the packages:
+### 5. Install your project
+
 ```bash
-# Auto-detects registry from config or use explicit registry
-pnpm-airgap publish --packages ./airgap-packages --registry http://localhost:4873
+pnpm install --registry http://localhost:4873
 ```
 
-**🎯 Key Advantage**: This workflow seamlessly bridges online development with offline deployment, supporting any npm-compatible registry without requiring pnpm-specific configuration on the offline side.
+## Interactive Mode
 
-### Step 4: Use Your Packages
+Run without arguments for a guided wizard:
 
-Configure your project to use the local registry:
 ```bash
-# Create .npmrc in your project
-echo "registry=http://localhost:4873" > .npmrc
+node cli.cjs
+```
 
-# Install dependencies
-pnpm install
+```
+┌─────────────────────────────────────────┐
+│  pnpm-airgap v2.0.0                     │
+│  Transfer dependencies to air-gapped    │
+│  environments with ease                 │
+└─────────────────────────────────────────┘
+
+? What would you like to do?
+  ❯ 📦 Fetch dependencies from lockfile
+    📤 Publish packages to registry
+    🔄 Sync registries
+    📊 Export registry state
+    📖 Quick start guide
+    ✖ Exit
+```
+
+## Commands
+
+### `fetch` - Download packages from lockfile
+
+```bash
+node cli.cjs fetch [options]
+
+Options:
+  -l, --lockfile <path>      Path to pnpm-lock.yaml (default: ./pnpm-lock.yaml)
+  -o, --output <path>        Output directory (default: ./airgap-packages)
+  -r, --registry <url>       Source registry (default: https://registry.npmjs.org)
+  --registry-state <path>    Registry state file for incremental fetching
+  --skip-optional            Skip optional dependencies
+  --concurrency <number>     Parallel downloads (default: 5)
+  --debug                    Enable debug output
+```
+
+### `publish` - Publish packages to registry
+
+```bash
+node cli.cjs publish [options]
+
+Options:
+  -p, --packages <path>      Packages directory (default: ./airgap-packages)
+  -r, --registry <url>       Target registry (default: http://localhost:4873)
+  --concurrency <number>     Parallel publishes (default: 3)
+  --no-skip-existing         Publish all packages even if they exist
+  --dry-run                  Preview without publishing
+  --debug                    Enable debug output
+```
+
+### `sync` - Sync between registries
+
+```bash
+node cli.cjs sync [options]
+
+Options:
+  -s, --source <url>         Source registry URL
+  -d, --dest <url>           Destination registry URL
+  -o, --output <path>        Output directory
+  --scope <scope>            Only sync packages in this scope
+  --download-only            Only download, don't publish
+  --publish-only             Only publish existing packages
+  --dry-run                  Preview without changes
+```
+
+### `registry-state export` - Export for incremental sync
+
+Export all packages from a registry to enable incremental fetching:
+
+```bash
+node cli.cjs registry-state export -r http://localhost:4873 -o registry-state.json
+
+# Then use with fetch to skip existing packages
+node cli.cjs fetch -l pnpm-lock.yaml --registry-state registry-state.json
+```
+
+### `info` - Show bundle information
+
+```bash
+node cli.cjs info ./packages
+```
+
+### `init` - Create config file
+
+```bash
+node cli.cjs init
 ```
 
 ## Configuration
 
-Create a configuration file for repeated use:
-
-```bash
-pnpm-airgap init
-```
-
-This creates `pnpm-airgap.config.json`:
+Create `pnpm-airgap.config.json`:
 
 ```json
 {
@@ -161,7 +169,6 @@ This creates `pnpm-airgap.config.json`:
     "outputDir": "./airgap-packages",
     "concurrency": 5,
     "registryUrl": "https://registry.npmjs.org",
-    "registryStatePath": null,
     "skipOptional": false
   },
   "publish": {
@@ -170,279 +177,150 @@ This creates `pnpm-airgap.config.json`:
     "concurrency": 3,
     "skipExisting": true
   },
-  "registryState": {
-    "registryUrl": "http://localhost:4873",
-    "outputPath": "./registry-state.json",
-    "concurrency": 10
+  "sync": {
+    "sourceRegistry": "",
+    "destRegistry": "http://localhost:4873",
+    "outputDir": "./sync-packages",
+    "skipExisting": true
   }
 }
 ```
 
-## Commands
+## Features
 
-### `pnpm-airgap fetch`
-
-Fetch all dependencies from pnpm lockfile (online mode).
-
-**Options:**
-- `-c, --config <path>` - Path to config file (default: `./pnpm-airgap.config.json`)
-- `-l, --lockfile <path>` - Path to pnpm-lock.yaml (default: `./pnpm-lock.yaml`)
-- `-o, --output <path>` - Output directory for packages (default: `./airgap-packages`)
-- `--registry-state <path>` - Registry state file for incremental fetching (only fetch missing packages)
-
-### `pnpm-airgap publish`
-
-Publish all packages to local registry (offline mode).
-
-**Options:**
-- `-c, --config <path>` - Path to config file (default: `./pnpm-airgap.config.json`)
-- `-p, --packages <path>` - Path to packages directory (default: `./airgap-packages`)
-- `-r, --registry <url>` - Verdaccio registry URL (default: `http://localhost:4873`)
-
-### `pnpm-airgap bootstrap`
-
-Publish packages without dependencies (for initial Verdaccio setup). This is ideal when your offline registry is empty and doesn't have the dependencies needed to install pnpm-airgap itself.
-
-**Options:**
-- `-p, --packages <path>` - Path to packages directory (default: `./airgap-packages`)
-- `-r, --registry <url>` - Verdaccio registry URL (default: `http://localhost:4873`)
-
-**Example:**
-```bash
-pnpm-airgap bootstrap --packages ./airgap-packages --registry http://localhost:4873
-```
-
-### `pnpm-airgap init`
-
-Create a default configuration file.
-
-### `pnpm-airgap registry-state export`
-
-Export the complete state (all packages and versions) from a registry. This is used for incremental fetching - export from your airgapped registry, then use the state file to fetch only missing packages.
-
-**Options:**
-- `-c, --config <path>` - Path to config file (default: `./pnpm-airgap.config.json`)
-- `-r, --registry <url>` - Registry URL to export from (default: `http://localhost:4873`)
-- `-o, --output <path>` - Output file path (default: `./registry-state.json`)
-- `-s, --scope <scope>` - Only export packages in this scope (e.g., `@mycompany`)
-- `--concurrency <number>` - Number of concurrent operations (default: `10`)
-
-**Example:**
-```bash
-# Export registry state from airgapped Verdaccio
-pnpm-airgap registry-state export -r http://verdaccio:4873 -o registry-state.json
-```
-
-## Reports
-
-Both commands generate detailed JSON reports:
-
-- **Fetch**: `bundle-info.json` - Download statistics and errors
-- **Publish**: `publish-report.json` - Publishing results for each package
+| Feature | Description |
+|---------|-------------|
+| **Standalone Binary** | Single 1.1MB file, runs with just Node.js - no npm install needed |
+| **Interactive Mode** | Guided wizard for all commands |
+| **Auto-detection** | Finds lockfiles and package directories automatically |
+| **Incremental Sync** | Export registry state to skip already-synced packages |
+| **Smart Tagging** | Auto-detects prerelease tags, handles version conflicts |
+| **Safety Blocks** | Prevents accidental publish to public registries (npmjs.org) |
+| **Rate Limiting** | Automatic backoff for 429 errors |
+| **Robust Parsing** | Handles scoped packages, aliases, patches, peer deps |
 
 ## Workflow Examples
 
-### Complete Airgap Transfer Workflow
+### Complete Airgap Transfer
 
 **Online Machine:**
 ```bash
-# 1. Create configuration
-pnpm-airgap init
+# Fetch all dependencies
+node cli.cjs fetch -l pnpm-lock.yaml -o ./packages
 
-# 2. Fetch all dependencies
-pnpm-airgap fetch
-
-# 3. Create tarball for transfer
-tar -czf airgap-transfer.tar.gz airgap-packages/ pnpm-airgap.config.json
+# Create transfer archive
+tar -czf transfer.tar.gz packages/ cli.cjs
 ```
 
 **Offline Machine:**
 ```bash
-# 1. Extract transferred files
-tar -xzf airgap-transfer.tar.gz
+# Extract
+tar -xzf transfer.tar.gz
 
-# 2. Start Verdaccio (if not running)
+# Start registry and login
 verdaccio &
-
-# 3. Login to registry
 npm login --registry http://localhost:4873
 
-# 4. Publish packages
-pnpm-airgap publish
+# Publish
+node cli.cjs publish -p ./packages -r http://localhost:4873
 
-# 5. Configure project to use local registry
+# Install your project
 echo "registry=http://localhost:4873" > .npmrc
-
-# 6. Install dependencies
 pnpm install
 ```
 
-### Incremental Sync Workflow (Bandwidth Optimization)
+### Incremental Updates
 
-When you need to transfer packages for multiple projects over time, avoid re-downloading packages that already exist in your airgapped registry:
-
-**On Airgapped Network (once, or periodically):**
-```bash
-# Export current registry state
-pnpm-airgap registry-state export -r http://verdaccio:4873 -o registry-state.json
-
-# Transfer registry-state.json to online network
-```
-
-**On Online Network:**
-```bash
-# Fetch only packages missing from your airgapped registry
-pnpm-airgap fetch -l pnpm-lock.yaml --registry-state registry-state.json -o ./packages
-
-# Only missing packages are downloaded - huge bandwidth savings!
-```
-
-**Result**: If your lockfile needs 500 packages but 450 already exist in your airgapped registry, only 50 packages are downloaded instead of 500.
-
-### Bootstrap Scenario (Empty Registry)
-
-If your offline registry doesn't have Node.js dependencies:
+Avoid re-downloading packages that already exist:
 
 ```bash
-# Extract pnpm-airgap package manually
-tar -xzf pnpm-airgap-1.6.0.tgz
-cd package
+# Export state from airgap registry
+node cli.cjs registry-state export -r http://verdaccio:4873 -o state.json
 
-# Use bootstrap publisher with zero dependencies
-node bin/cli.js bootstrap --packages ../airgap-packages
+# Transfer state.json to online machine
 
-# Now you can install pnpm-airgap normally
-npm install -g pnpm-airgap
-```
-
-The bootstrap publisher now features:
-- Smart pre-checking with caching to avoid redundant processing
-- Support for multiple tar implementations (Windows/Linux)
-- Automatic prerelease tag detection
-- Version conflict resolution with automatic retry
-
-## Troubleshooting
-
-### Authentication Issues
-```bash
-# Ensure you're logged in to the target registry
-npm login --registry http://localhost:4873
-
-# Verify authentication
-npm whoami --registry http://localhost:4873
-```
-
-### Missing Packages
-- Check `bundle-info.json` for download failures
-- Verify network connectivity during fetch
-- Ensure lockfile is up to date: `pnpm install`
-
-### Publishing Conflicts
-- Use `skipExisting: true` in config to skip already published packages
-- Check `publish-report.json` for detailed error messages
-
-## Advanced Usage
-
-### Custom Registry for Fetching
-```javascript
-// pnpm-airgap.config.json
-{
-  "fetch": {
-    "registryUrl": "https://your-custom-registry.com"
-  }
-}
-```
-
-### Parallel Processing Tuning
-```javascript
-{
-  "fetch": {
-    "concurrency": 10  // Increase for faster downloads
-  },
-  "publish": {
-    "concurrency": 5   // Adjust based on registry capacity
-  }
-}
+# Fetch only missing packages
+node cli.cjs fetch -l pnpm-lock.yaml --registry-state state.json -o ./packages
+# Result: If lockfile needs 500 packages but 450 exist, only 50 are downloaded
 ```
 
 ## Programmatic API
 
-You can also use pnpm-airgap programmatically in your Node.js applications:
+```typescript
+import { fetchDependencies, publishPackages } from 'pnpm-airgap';
 
-```javascript
-const { fetchDependencies, publishPackages } = require('pnpm-airgap');
-
-// Fetch dependencies
-const fetchConfig = {
+// Fetch
+await fetchDependencies({
   lockfilePath: './pnpm-lock.yaml',
-  outputDir: './airgap-packages',
-  concurrency: 5,
+  outputDir: './packages',
   registryUrl: 'https://registry.npmjs.org',
-  skipOptional: false
-};
+  concurrency: 5,
+});
 
-await fetchDependencies(fetchConfig);
-
-// Publish packages
-const publishConfig = {
-  packagesDir: './airgap-packages',
+// Publish
+await publishPackages({
+  packagesDir: './packages',
   registryUrl: 'http://localhost:4873',
   concurrency: 3,
-  skipExisting: true
-};
-
-await publishPackages(publishConfig);
+  skipExisting: true,
+});
 ```
 
 ## Compatibility
 
-- **Node.js**: 14.0.0 or higher
-- **pnpm**: All versions (v6, v7, v8, v9+)
-- **Verdaccio**: 4.x, 5.x, and 6.x
-- **npm**: For authentication and publishing
-- **Platforms**: Windows, Linux, macOS (cross-platform tar support)
+| Component | Supported Versions |
+|-----------|-------------------|
+| **Node.js** | 18.0.0 or higher |
+| **pnpm lockfile** | v5, v6, v9 |
+| **Registries** | Verdaccio, Nexus, Artifactory, any npm-compatible |
+| **Platforms** | Windows, Linux, macOS |
 
-## Recent Improvements (v1.6.0)
+## Reports
 
-### New Feature: Incremental Sync
-- **Registry state export**: New `registry-state export` command exports all packages and versions from your airgapped registry
-- **Diff-based fetching**: New `--registry-state` option for `fetch` command compares lockfile against registry state and only downloads missing packages
-- **Bandwidth optimization**: Dramatically reduces transfer size when syncing multiple projects - only new/missing packages are fetched
-- **Full version tracking**: Registry state tracks ALL versions of each package, ensuring exact lockfile compatibility
+Both fetch and publish commands generate JSON reports:
 
-### Configuration
-- Added `registryState` section to config file for export settings
-- Added `fetch.registryStatePath` for persistent incremental fetch configuration
+- `metadata.json` - Package list and metadata
+- `bundle-info.json` - Download statistics
+- `publish-report.json` - Publishing results
 
-## Previous Improvements (v1.5.0)
+## Troubleshooting
 
-### Bug Fixes
-- **Fixed publish tag override**: Always explicitly specify `--tag` when publishing to override `publishConfig.tag` in package.json. This fixes an issue where packages like pnpm (which have `publishConfig.tag: 'next-10'`) would be published with the wrong tag instead of `latest`.
+### Authentication Issues
 
-## Previous Improvements (v1.3.0 - v1.4.0)
+```bash
+# Verify you're logged in
+npm whoami --registry http://localhost:4873
 
-### Performance Enhancements
-- **Package info caching**: Pre-check phase now caches extracted package info, eliminating redundant tarball extraction during publishing (~30% performance improvement)
-- **Smart pre-checking**: Bulk existence checks before processing to skip already-published packages early
-- **Memory optimization**: 1MB limit on package.json size to prevent memory issues with malformed packages
+# Re-login if needed
+npm login --registry http://localhost:4873
+```
 
-### Robustness Improvements
-- **Enhanced error handling**: Better null-safety checks in lockfile parsing for various pnpm versions
-- **Windows compatibility**: Multiple tar command patterns to handle different tar implementations (bsdtar, GNU tar)
-- **Version conflict handling**: Automatic retry with version-specific tags when publishing older versions
-- **Prerelease tag detection**: Automatic detection and application of appropriate tags (alpha, beta, rc, canary, dev, next, pre)
+### Missing Packages
 
-### Code Quality
-- **Centralized constants**: All configuration values extracted to constants.js for maintainability
-- **Consistent status codes**: All status returns use centralized STATUS constants
-- **Improved modularity**: Shared utilities extracted for reuse across bootstrap and offline publishers
-- **Better logging**: Enhanced progress reporting with detailed error messages
+Check `bundle-info.json` for download failures and ensure lockfile is current.
 
-### Bug Fixes
-- Fixed duplicate execAsync declaration in offline-publisher
-- Fixed status constant inconsistency across modules
-- Fixed null-safety issues in lockfile resolution parsing
-- Fixed memory accumulation in large package.json extraction
+### Publishing Conflicts
+
+The tool automatically handles:
+- Version conflicts (uses version-specific tags)
+- Prerelease versions (applies correct tags)
+- Already-existing packages (skips by default)
+
+## Development
+
+```bash
+# Install dependencies
+pnpm install
+
+# Build
+pnpm build
+
+# Run tests
+pnpm test
+
+# Lint
+pnpm lint
+```
 
 ## License
 
@@ -451,7 +329,3 @@ MIT
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
-
-## Support
-
-For issues and questions, please use the GitHub issue tracker.
