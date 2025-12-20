@@ -10,7 +10,38 @@ import { fetchDependencies } from '../commands/fetch.js';
 import { publishPackages } from '../commands/publish.js';
 import { syncRegistries } from '../commands/sync.js';
 import { exportRegistryState } from '../commands/registry-state.js';
-import { DEFAULTS } from '../constants.js';
+import { DEFAULTS, DEFAULT_CONFIG } from '../constants.js';
+
+// Config file path
+const CONFIG_PATH = './pnpm-airgap.config.json';
+
+// Runtime config (loaded on start)
+let config: typeof DEFAULT_CONFIG = { ...DEFAULT_CONFIG };
+
+/**
+ * Load config file if it exists
+ */
+async function loadConfig(): Promise<void> {
+  try {
+    if (await fs.pathExists(CONFIG_PATH)) {
+      const loaded = await fs.readJson(CONFIG_PATH);
+      config = { ...DEFAULT_CONFIG, ...loaded };
+    }
+  } catch {
+    // Ignore errors, use defaults
+  }
+}
+
+/**
+ * Save config file
+ */
+async function saveConfig(): Promise<void> {
+  try {
+    await fs.writeJson(CONFIG_PATH, config, { spaces: 2 });
+  } catch {
+    // Ignore save errors
+  }
+}
 
 // Styled banner
 const BANNER = `
@@ -86,13 +117,15 @@ async function countTarballs(dir: string): Promise<number> {
  * Interactive fetch command
  */
 async function interactiveFetch(): Promise<void> {
-  console.log(chalk.bold('\n📦 Fetch Dependencies\n'));
+  console.clear();
+  console.log(BANNER);
+  console.log(chalk.bold('📦 Fetch Dependencies\n'));
 
   const detectedLockfile = await detectLockfile();
 
   const lockfilePath = await input({
     message: 'Lockfile path:',
-    default: detectedLockfile || DEFAULTS.LOCKFILE_PATH,
+    default: detectedLockfile || config.fetch.lockfilePath || DEFAULTS.LOCKFILE_PATH,
     theme,
     validate: async (value) => {
       if (!value) return 'Lockfile path is required';
@@ -103,13 +136,13 @@ async function interactiveFetch(): Promise<void> {
 
   const outputDir = await input({
     message: 'Output directory:',
-    default: DEFAULTS.PACKAGES_DIR,
+    default: config.fetch.outputDir || DEFAULTS.PACKAGES_DIR,
     theme,
   });
 
   const registryUrl = await input({
     message: 'Source registry:',
-    default: DEFAULTS.NPM_REGISTRY_URL,
+    default: config.fetch.registryUrl || DEFAULTS.NPM_REGISTRY_URL,
     theme,
     validate: (value) => {
       try {
@@ -124,15 +157,15 @@ async function interactiveFetch(): Promise<void> {
   const options = await checkbox({
     message: 'Options:',
     choices: [
-      { name: 'Skip optional dependencies', value: 'skipOptional' },
-      { name: 'Enable debug output', value: 'debug' },
+      { name: 'Skip optional dependencies', value: 'skipOptional', checked: config.fetch.skipOptional },
+      { name: 'Enable debug output', value: 'debug', checked: config.fetch.debug },
     ],
     theme,
   });
 
   const concurrency = await input({
     message: 'Concurrency (parallel downloads):',
-    default: '5',
+    default: String(config.fetch.concurrency || 5),
     theme,
     validate: (value) => {
       const num = parseInt(value, 10);
@@ -140,6 +173,18 @@ async function interactiveFetch(): Promise<void> {
       return true;
     },
   });
+
+  // Save config for next time
+  config.fetch = {
+    ...config.fetch,
+    lockfilePath,
+    outputDir,
+    registryUrl,
+    concurrency: parseInt(concurrency, 10),
+    skipOptional: options.includes('skipOptional'),
+    debug: options.includes('debug'),
+  };
+  await saveConfig();
 
   // Summary
   console.log(chalk.gray('\n─────────────────────────────────────────'));
@@ -179,13 +224,15 @@ async function interactiveFetch(): Promise<void> {
  * Interactive publish command
  */
 async function interactivePublish(): Promise<void> {
-  console.log(chalk.bold('\n📤 Publish Packages\n'));
+  console.clear();
+  console.log(BANNER);
+  console.log(chalk.bold('📤 Publish Packages\n'));
 
   const detectedDir = await detectPackagesDir();
 
   const packagesDir = await input({
     message: 'Packages directory:',
-    default: detectedDir || DEFAULTS.PACKAGES_DIR,
+    default: detectedDir || config.publish.packagesDir || DEFAULTS.PACKAGES_DIR,
     theme,
     validate: async (value) => {
       if (!value) return 'Directory path is required';
@@ -203,7 +250,7 @@ async function interactivePublish(): Promise<void> {
 
   const registryUrl = await input({
     message: 'Target registry:',
-    default: DEFAULTS.REGISTRY_URL,
+    default: config.publish.registryUrl || DEFAULTS.REGISTRY_URL,
     theme,
     validate: (value) => {
       try {
@@ -221,16 +268,16 @@ async function interactivePublish(): Promise<void> {
   const options = await checkbox({
     message: 'Options:',
     choices: [
-      { name: 'Skip existing packages (recommended)', value: 'skipExisting', checked: true },
-      { name: 'Dry run (preview only)', value: 'dryRun' },
-      { name: 'Enable debug output', value: 'debug' },
+      { name: 'Skip existing packages (recommended)', value: 'skipExisting', checked: config.publish.skipExisting !== false },
+      { name: 'Dry run (preview only)', value: 'dryRun', checked: config.publish.dryRun },
+      { name: 'Enable debug output', value: 'debug', checked: config.publish.debug },
     ],
     theme,
   });
 
   const concurrency = await input({
     message: 'Concurrency (parallel publishes):',
-    default: '3',
+    default: String(config.publish.concurrency || 3),
     theme,
     validate: (value) => {
       const num = parseInt(value, 10);
@@ -238,6 +285,18 @@ async function interactivePublish(): Promise<void> {
       return true;
     },
   });
+
+  // Save config for next time
+  config.publish = {
+    ...config.publish,
+    packagesDir,
+    registryUrl,
+    concurrency: parseInt(concurrency, 10),
+    skipExisting: options.includes('skipExisting'),
+    dryRun: options.includes('dryRun'),
+    debug: options.includes('debug'),
+  };
+  await saveConfig();
 
   // Summary
   console.log(chalk.gray('\n─────────────────────────────────────────'));
@@ -276,7 +335,9 @@ async function interactivePublish(): Promise<void> {
  * Interactive sync command
  */
 async function interactiveSync(): Promise<void> {
-  console.log(chalk.bold('\n🔄 Sync Registries\n'));
+  console.clear();
+  console.log(BANNER);
+  console.log(chalk.bold('🔄 Sync Registries\n'));
 
   const mode = await select({
     message: 'Sync mode:',
@@ -290,11 +351,12 @@ async function interactiveSync(): Promise<void> {
 
   let sourceRegistry = '';
   let destRegistry = '';
-  let outputDir = './sync-packages';
+  let outputDir = config.sync.outputDir || './sync-packages';
 
   if (mode !== 'publish') {
     sourceRegistry = await input({
       message: 'Source registry URL:',
+      default: config.sync.sourceRegistry || '',
       theme,
       validate: (value) => {
         if (!value) return 'Source registry is required';
@@ -311,7 +373,7 @@ async function interactiveSync(): Promise<void> {
   if (mode !== 'download') {
     destRegistry = await input({
       message: 'Destination registry URL:',
-      default: DEFAULTS.REGISTRY_URL,
+      default: config.sync.destRegistry || DEFAULTS.REGISTRY_URL,
       theme,
       validate: (value) => {
         if (!value) return 'Destination registry is required';
@@ -331,14 +393,14 @@ async function interactiveSync(): Promise<void> {
   if (mode !== 'publish') {
     outputDir = await input({
       message: 'Output directory:',
-      default: './sync-packages',
+      default: config.sync.outputDir || './sync-packages',
       theme,
     });
   } else {
     const detectedDir = await detectPackagesDir();
     outputDir = await input({
       message: 'Packages directory:',
-      default: detectedDir || './sync-packages',
+      default: detectedDir || config.sync.outputDir || './sync-packages',
       theme,
       validate: async (value) => {
         if (!(await fs.pathExists(value))) return `Directory not found: ${value}`;
@@ -349,18 +411,32 @@ async function interactiveSync(): Promise<void> {
 
   const scope = await input({
     message: 'Scope filter (optional, e.g., @mycompany):',
+    default: config.sync.scope || '',
     theme,
   });
 
   const options = await checkbox({
     message: 'Options:',
     choices: [
-      { name: 'Skip existing packages', value: 'skipExisting', checked: true },
-      { name: 'Dry run (preview only)', value: 'dryRun' },
-      { name: 'Enable debug output', value: 'debug' },
+      { name: 'Skip existing packages', value: 'skipExisting', checked: config.sync.skipExisting !== false },
+      { name: 'Dry run (preview only)', value: 'dryRun', checked: config.sync.dryRun },
+      { name: 'Enable debug output', value: 'debug', checked: config.sync.debug },
     ],
     theme,
   });
+
+  // Save config for next time
+  config.sync = {
+    ...config.sync,
+    sourceRegistry,
+    destRegistry,
+    outputDir,
+    scope: scope || null,
+    skipExisting: options.includes('skipExisting'),
+    dryRun: options.includes('dryRun'),
+    debug: options.includes('debug'),
+  };
+  await saveConfig();
 
   // Summary
   console.log(chalk.gray('\n─────────────────────────────────────────'));
@@ -401,11 +477,13 @@ async function interactiveSync(): Promise<void> {
  * Interactive registry state export
  */
 async function interactiveRegistryState(): Promise<void> {
-  console.log(chalk.bold('\n📊 Export Registry State\n'));
+  console.clear();
+  console.log(BANNER);
+  console.log(chalk.bold('📊 Export Registry State\n'));
 
   const registryUrl = await input({
     message: 'Registry URL:',
-    default: DEFAULTS.REGISTRY_URL,
+    default: config.registryState.registryUrl || DEFAULTS.REGISTRY_URL,
     theme,
     validate: (value) => {
       try {
@@ -419,20 +497,31 @@ async function interactiveRegistryState(): Promise<void> {
 
   const outputPath = await input({
     message: 'Output file:',
-    default: './registry-state.json',
+    default: config.registryState.outputPath || './registry-state.json',
     theme,
   });
 
   const scope = await input({
     message: 'Scope filter (optional, e.g., @mycompany):',
+    default: config.registryState.scope || '',
     theme,
   });
 
   const debug = await confirm({
     message: 'Enable debug output?',
-    default: false,
+    default: config.registryState.debug || false,
     theme,
   });
+
+  // Save config for next time
+  config.registryState = {
+    ...config.registryState,
+    registryUrl,
+    outputPath,
+    scope: scope || null,
+    debug,
+  };
+  await saveConfig();
 
   console.log('');
   await exportRegistryState({
@@ -447,7 +536,9 @@ async function interactiveRegistryState(): Promise<void> {
  * Show quick start guide
  */
 function showQuickStart(): void {
-  console.log(chalk.bold('\n📖 Quick Start Guide\n'));
+  console.clear();
+  console.log(BANNER);
+  console.log(chalk.bold('📖 Quick Start Guide\n'));
 
   console.log(chalk.cyan('Typical workflow:'));
   console.log(chalk.gray('─────────────────────────────────────────'));
@@ -477,6 +568,10 @@ function showQuickStart(): void {
  * Main interactive mode entry point
  */
 export async function runInteractiveMode(): Promise<void> {
+  // Load config once at start
+  await loadConfig();
+
+  console.clear();
   console.log(BANNER);
 
   const action = await select({
