@@ -12,3 +12,4 @@ yarn.lock
 publish-report.json
 .claude
 pnpm-airgap.config.json
+registry-state.json
