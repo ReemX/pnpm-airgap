@@ -10,7 +10,7 @@ import path from 'path';
 import { fetchDependencies } from './commands/fetch.js';
 import { publishPackages } from './commands/publish.js';
 import { syncRegistries } from './commands/sync.js';
-import { exportRegistryState } from './commands/registry-state.js';
+import { exportRegistryState, registryStateFromLockfile } from './commands/registry-state.js';
 import { runInteractiveMode } from './ui/interactive.js';
 import { DEFAULT_CONFIG } from './constants.js';
 
@@ -181,6 +181,35 @@ registryState
         ...(options.output && { outputPath: options.output }),
         ...(options.scope && { scope: options.scope }),
         ...(options.concurrency && { concurrency: options.concurrency }),
+        ...(options.debug && { debug: true }),
+      });
+
+      process.exit(result.success ? 0 : 1);
+    } catch (error) {
+      console.error(chalk.red('Error:'), (error as Error).message);
+      if (options.debug) console.error((error as Error).stack);
+      process.exit(1);
+    }
+  });
+
+registryState
+  .command('from-lockfile')
+  .description('Build registry state from a pnpm lockfile')
+  .option('-c, --config <path>', 'Path to config file')
+  .option('-l, --lockfile <path>', 'Path to pnpm-lock.yaml')
+  .option('-o, --output <path>', 'Output file path')
+  .option('-m, --merge <path>', 'Existing registry-state to merge with')
+  .option('-r, --registry <label>', 'Registry label for the output')
+  .option('--skip-optional', 'Skip optional dependencies')
+  .option('--debug', 'Enable debug output')
+  .action(async (options) => {
+    try {
+      const result = await registryStateFromLockfile({
+        ...(options.lockfile && { lockfilePath: options.lockfile }),
+        ...(options.output && { outputPath: options.output }),
+        ...(options.merge && { mergeWith: options.merge }),
+        ...(options.registry && { registry: options.registry }),
+        ...(options.skipOptional && { skipOptional: true }),
         ...(options.debug && { debug: true }),
       });
 

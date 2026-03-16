@@ -10,10 +10,13 @@ export { publishPackages, type PublishResult } from './commands/publish.js';
 export { syncRegistries, type SyncResult } from './commands/sync.js';
 export {
   exportRegistryState,
+  registryStateFromLockfile,
   loadRegistryState,
   buildVersionLookup,
   filterMissingPackages,
   type ExportResult,
+  type FromLockfileConfig,
+  type FromLockfileResult,
 } from './commands/registry-state.js';
 
 // Core utilities

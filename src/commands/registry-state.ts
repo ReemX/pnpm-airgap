@@ -9,9 +9,10 @@ import chalk from 'chalk';
 import type { RegistryStateConfig, RegistryState, LockfilePackage } from '../types.js';
 import { DEFAULT_CONFIG } from '../constants.js';
 import { listAllPackages, getPackageMetadata } from '../core/registry.js';
+import { parseLockfile } from '../core/lockfile.js';
 import { getAuthToken } from '../utils/http.js';
 import { setDebugMode, debug } from '../utils/logger.js';
-import { isValidUrl } from '../utils/validation.js';
+import { isValidUrl, validateFile } from '../utils/validation.js';
 import { createSpinner, printHeader, printInfo } from '../ui/progress.js';
 
 export const REGISTRY_STATE_VERSION = 1;
@@ -243,5 +244,134 @@ export async function exportRegistryState(config: Partial<RegistryStateConfig> =
     success: errors.length === 0,
     stats: registryState.stats,
     errors: errors.length > 0 ? errors : undefined,
+  };
+}
+
+// =============================================================================
+// From Lockfile
+// =============================================================================
+
+export interface FromLockfileConfig {
+  lockfilePath: string;
+  outputPath: string;
+  /** Existing registry-state to merge with (preserves old versions not in lockfile) */
+  mergeWith?: string | null;
+  /** Registry URL label for the output (default: 'from-lockfile') */
+  registry?: string;
+  skipOptional?: boolean;
+  debug?: boolean;
+}
+
+export interface FromLockfileResult {
+  success: boolean;
+  stats: { totalPackages: number; totalVersions: number };
+  merged: boolean;
+}
+
+/**
+ * Build a registry-state from a pnpm lockfile.
+ *
+ * Parses the lockfile to extract all package names and versions,
+ * then outputs a registry-state.json. Optionally merges with an
+ * existing registry-state to preserve versions not in the lockfile.
+ *
+ * Use case: on the internet (authority) side after exporting a bundle
+ * with packages, to predict the airgap registry state without needing
+ * access to a live Verdaccio instance.
+ */
+export async function registryStateFromLockfile(config: Partial<FromLockfileConfig> = {}): Promise<FromLockfileResult> {
+  const {
+    lockfilePath = 'pnpm-lock.yaml',
+    outputPath = 'registry-state.json',
+    mergeWith,
+    registry = 'from-lockfile',
+    skipOptional = false,
+    debug: debugEnabled = false,
+  } = config;
+
+  if (debugEnabled) {
+    setDebugMode(true);
+  }
+
+  printHeader('Registry State from Lockfile');
+  printInfo('Lockfile', lockfilePath);
+  printInfo('Output', outputPath);
+  if (mergeWith) {
+    printInfo('Merge with', mergeWith);
+  }
+
+  // Parse lockfile
+  const spinner = createSpinner('Parsing lockfile...');
+
+  await validateFile(lockfilePath);
+  const lockfileResult = await parseLockfile(lockfilePath, { skipOptional });
+  spinner.succeed(`Parsed ${lockfileResult.packages.size} packages from lockfile (v${lockfileResult.lockfileVersion})`);
+
+  // Build packages map from lockfile
+  const packages: Record<string, string[]> = {};
+
+  for (const [, pkg] of lockfileResult.packages) {
+    if (!packages[pkg.name]) {
+      packages[pkg.name] = [];
+    }
+    if (!packages[pkg.name].includes(pkg.version)) {
+      packages[pkg.name].push(pkg.version);
+    }
+  }
+
+  // Merge with existing registry-state if provided
+  let merged = false;
+  if (mergeWith && await fs.pathExists(mergeWith)) {
+    const mergeSpinner = createSpinner('Merging with existing registry state...');
+    try {
+      const existingState = await loadRegistryState(mergeWith);
+
+      for (const [name, versions] of Object.entries(existingState.packages)) {
+        if (!packages[name]) {
+          packages[name] = [...versions];
+        } else {
+          for (const version of versions) {
+            if (!packages[name].includes(version)) {
+              packages[name].push(version);
+            }
+          }
+        }
+      }
+
+      merged = true;
+      mergeSpinner.succeed('Merged with existing registry state');
+    } catch (error) {
+      mergeSpinner.warn(`Could not merge: ${(error as Error).message}`);
+    }
+  }
+
+  // Sort versions within each package
+  for (const name of Object.keys(packages)) {
+    packages[name].sort();
+  }
+
+  // Calculate stats
+  const totalPackages = Object.keys(packages).length;
+  const totalVersions = Object.values(packages).reduce((sum, v) => sum + v.length, 0);
+
+  // Write registry state
+  const registryState: RegistryState = {
+    version: REGISTRY_STATE_VERSION,
+    exportedAt: new Date().toISOString(),
+    registry,
+    stats: { totalPackages, totalVersions },
+    packages,
+  };
+
+  await fs.ensureDir(path.dirname(outputPath));
+  await fs.writeJson(outputPath, registryState, { spaces: 2 });
+
+  console.log(chalk.green(`\n✓ Registry state created from lockfile: ${outputPath}`));
+  console.log(chalk.gray(`  ${totalPackages} packages, ${totalVersions} versions${merged ? ' (merged)' : ''}`));
+
+  return {
+    success: true,
+    stats: { totalPackages, totalVersions },
+    merged,
   };
 }
