@@ -1,6 +1,6 @@
 {
   "name": "pnpm-airgap",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "description": "Transfer pnpm project dependencies between online and offline environments",
   "type": "module",
   "main": "dist/index.js",

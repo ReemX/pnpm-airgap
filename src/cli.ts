@@ -11,11 +11,12 @@ import { fetchDependencies } from './commands/fetch.js';
 import { publishPackages } from './commands/publish.js';
 import { syncRegistries } from './commands/sync.js';
 import { exportRegistryState, registryStateFromLockfile } from './commands/registry-state.js';
+import { prunePackages } from './commands/prune.js';
 import { runInteractiveMode } from './ui/interactive.js';
 import { DEFAULT_CONFIG } from './constants.js';
 
 // Version is injected at build time via tsup define
-const packageVersion = process.env.npm_package_version || '2.0.0';
+const packageVersion = process.env.npm_package_version || '2.3.0';
 
 const program = new Command();
 
@@ -210,6 +211,43 @@ registryState
         ...(options.merge && { mergeWith: options.merge }),
         ...(options.registry && { registry: options.registry }),
         ...(options.skipOptional && { skipOptional: true }),
+        ...(options.debug && { debug: true }),
+      });
+
+      process.exit(result.success ? 0 : 1);
+    } catch (error) {
+      console.error(chalk.red('Error:'), (error as Error).message);
+      if (options.debug) console.error((error as Error).stack);
+      process.exit(1);
+    }
+  });
+
+// Prune command
+program
+  .command('prune')
+  .description('Remove registry versions not referenced by any consumer lockfile')
+  .option('-l, --lockfile <paths...>', 'One or more pnpm-lock.yaml paths (union = keep-set)')
+  .option('-r, --registry <url>', 'Registry URL')
+  .option('--prune-orphans', 'Also remove whole packages absent from every lockfile')
+  .option('--keep <names...>', 'Package names protected from orphan removal')
+  .option('--concurrency <number>', 'Concurrent unpublishes', parseInt)
+  .option('--yes', 'Execute removals (default is dry-run)')
+  .option('--debug', 'Enable debug output')
+  .action(async (options) => {
+    try {
+      if (!options.registry) {
+        console.error(chalk.red('Registry URL is required'));
+        console.error(chalk.gray('Use -r/--registry'));
+        process.exit(1);
+      }
+
+      const result = await prunePackages({
+        ...(options.lockfile && { lockfiles: options.lockfile }),
+        registryUrl: options.registry,
+        ...(options.concurrency && { concurrency: options.concurrency }),
+        ...(options.pruneOrphans && { pruneOrphans: true }),
+        ...(options.keep && { keep: options.keep }),
+        dryRun: !options.yes,
         ...(options.debug && { debug: true }),
       });
 

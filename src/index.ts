@@ -8,6 +8,7 @@
 export { fetchDependencies, type FetchResult } from './commands/fetch.js';
 export { publishPackages, type PublishResult } from './commands/publish.js';
 export { syncRegistries, type SyncResult } from './commands/sync.js';
+export { prunePackages, type PruneConfig, type PruneResult } from './commands/prune.js';
 export {
   exportRegistryState,
   registryStateFromLockfile,
@@ -53,6 +54,8 @@ export {
   generateVersionTag,
   type PublishOptions,
 } from './core/publisher.js';
+
+export { unpublishVersion, type UnpublishOptions } from './core/unpublisher.js';
 
 // Utilities
 export { setDebugMode, debug } from './utils/logger.js';

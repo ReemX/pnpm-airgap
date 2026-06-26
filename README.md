@@ -75,7 +75,7 @@ node cli.cjs
 
 ```
 ┌───────────────────────────────────────┐
-│  pnpm-airgap v2.0.0                   │
+│  pnpm-airgap v2.3.0                   │
 │  Transfer dependencies to air-gapped  │
 │  environments with ease               │
 └───────────────────────────────────────┘
@@ -146,6 +146,47 @@ node cli.cjs registry-state export -r http://localhost:4873 -o registry-state.js
 node cli.cjs fetch -l pnpm-lock.yaml --registry-state registry-state.json
 ```
 
+### `prune` - Remove stale versions from a registry
+
+Private registries (Verdaccio, etc.) have **no garbage collection** - every published
+version stays forever, so a long-lived airgap registry bloats with old versions no project
+installs anymore. `prune` trims a registry down to the **union of your consumer lockfiles**:
+any version not referenced by a lockfile is safe to remove.
+
+```bash
+# Dry-run (default): show what would be removed, delete nothing
+node cli.cjs prune -l ./pnpm-lock.yaml -r http://localhost:4873
+
+# Multiple consumers: keep-set is the UNION of all their lockfiles
+node cli.cjs prune -l repoA/pnpm-lock.yaml -l repoB/pnpm-lock.yaml -r http://localhost:4873
+
+# Execute the removals
+node cli.cjs prune -l ./pnpm-lock.yaml -r http://localhost:4873 --yes
+
+Options:
+  -l, --lockfile <paths...>  One or more pnpm-lock.yaml paths (union = keep-set)
+  -r, --registry <url>       Registry URL
+  --prune-orphans            Also remove whole packages absent from every lockfile
+  --keep <names...>          Package names protected from orphan removal
+  --concurrency <number>     Parallel unpublishes (default: 5)
+  --yes                      Execute removals (default is dry-run)
+  --debug                    List every version in the plan
+```
+
+**Safety:** prune works at **version granularity, never package granularity** - it only removes
+stale versions of packages your lockfile *references*. Packages absent from every lockfile (e.g.
+tooling you published deliberately) are left completely untouched unless you opt in with
+`--prune-orphans`. Removals use `npm unpublish`, so the registry trims its own manifest + tarball;
+no on-disk surgery. Anything pruned reappears the next time you `publish` a lockfile that needs it.
+
+> **Why not "keep newest N versions"?** Because a transitive dependency can pin an exact *old*
+> version - "keep newest N" would delete it and break offline `--frozen-lockfile` installs. The
+> lockfile union always keeps exactly what every install needs, no more, no less.
+
+**Tip:** run `prune` as the second half of a sync - `publish` the new closure first (adds current
+versions), then `prune` to the *same* lockfile (removes what dropped out). Never prune below the
+lockfile your target environment actually runs.
+
 ### `info` - Show bundle information
 
 ```bash
@@ -194,6 +235,7 @@ Create `pnpm-airgap.config.json`:
 | **Interactive Mode**  | Guided wizard for all commands                                    |
 | **Auto-detection**    | Finds lockfiles and package directories automatically             |
 | **Incremental Sync**  | Export registry state to skip already-synced packages             |
+| **Storage Prune**     | Trim a registry to the union of consumer lockfiles (reclaims GBs)  |
 | **Smart Tagging**     | Auto-detects prerelease tags, handles version conflicts           |
 | **Safety Blocks**     | Prevents accidental publish to public registries (npmjs.org)      |
 | **Rate Limiting**     | Automatic backoff for 429 errors                                  |
@@ -244,6 +286,20 @@ node cli.cjs registry-state export -r http://verdaccio:4873 -o state.json
 # Fetch only missing packages
 node cli.cjs fetch -l pnpm-lock.yaml --registry-state state.json -o ./packages
 # Result: If lockfile needs 500 packages but 450 exist, only 50 are downloaded
+```
+
+### Keeping the Registry Lean
+
+A no-uplink registry grows forever. Reclaim space by pruning to what you actually install:
+
+```bash
+# Preview (safe) - see how much is stale
+node cli.cjs prune -l pnpm-lock.yaml -r http://verdaccio:4873
+
+# Reclaim - publish current closure, then prune to the same lockfile
+node cli.cjs publish -p ./packages -r http://verdaccio:4873
+node cli.cjs prune   -l pnpm-lock.yaml -r http://verdaccio:4873 --yes
+# Result: registry == exactly your lockfile closure; stale versions gone
 ```
 
 ## Programmatic API
