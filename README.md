@@ -75,7 +75,7 @@ node cli.cjs
 
 ```
 ┌───────────────────────────────────────┐
-│  pnpm-airgap v2.3.0                   │
+│  pnpm-airgap v2.4.0                   │
 │  Transfer dependencies to air-gapped  │
 │  environments with ease               │
 └───────────────────────────────────────┘
@@ -119,6 +119,27 @@ Options:
   --dry-run                  Preview without publishing
   --debug                    Enable debug output
 ```
+
+#### Publish reliability (v2.4.0)
+
+Publishing to a private registry has subtle failure modes — `publish` is hardened against them:
+
+- **Authenticated skip-existing.** The existence pre-check now resolves your token exactly like
+  `npm publish` does (`npm config get` across project `.npmrc` / `--userconfig` / globalconfig, plus
+  `NPM_TOKEN` / `NODE_AUTH_TOKEN`). Previously, on an **auth-gated** registry the probe got `401`,
+  every package looked "uncertain", and re-runs silently re-published *everything*. Now an already-
+  populated registry is correctly skipped — re-publish is a true no-op, not a reflush.
+- **Per-package-name serialization.** Versions of the **same** package are published sequentially
+  (different packages still run in parallel up to `--concurrency`). Verdaccio's manifest update is a
+  non-atomic read-modify-write; publishing two versions of one package concurrently can race so that
+  a tarball lands but its manifest entry is lost — an **orphan** (`409` on re-publish, `404` on fetch).
+  Serializing per name removes that race at the source.
+- **Orphan detection, not silent skip.** A `409 Conflict` is verified against the manifest: if the
+  version is really there, it's an idempotent skip; if the tarball exists but the version is **absent
+  from the manifest**, it's reported as an **ORPHAN error** (non-zero exit) with the exact storage
+  path — never masked as success. Orphans can only be cleared by deleting the stray `.tgz` from the
+  **registry host's** storage and re-publishing (no HTTP API can remove a manifest-absent tarball), so
+  run a periodic orphan sweep on the registry host if multiple machines publish concurrently.
 
 ### `sync` - Sync between registries
 

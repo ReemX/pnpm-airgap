@@ -59,6 +59,13 @@ export interface OperationResult {
   attempt?: number;
   note?: string;
   dryRun?: boolean;
+  /**
+   * True when a 409 conflict was found to be an ORPHAN: a tarball exists on the
+   * registry's storage but the version is missing from the package manifest
+   * (a raced/partial publish). Cannot be healed over HTTP — needs server-side
+   * storage cleanup. Surfaced as an error, never silently skipped.
+   */
+  orphan?: boolean;
 }
 
 // Fetch configuration

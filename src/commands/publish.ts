@@ -178,7 +178,26 @@ export async function publishPackages(config: Partial<PublishConfig> = {}): Prom
     }
   }
 
-  // Publish packages
+  // Publish packages.
+  //
+  // Group tarballs by package NAME and publish each package's versions
+  // SEQUENTIALLY, while still running up to `concurrency` distinct package
+  // names in parallel. Verdaccio's local-storage does a non-atomic
+  // read-modify-write of each package's manifest, so two concurrent publishes
+  // of different versions of the SAME package race: one tarball lands but its
+  // manifest entry is lost, leaving an orphan (tgz on disk, version absent from
+  // the manifest -> 409-on-republish / 404-on-fetch, FS-delete-only recovery).
+  // Per-name serialization removes that race at the source; cross-package
+  // concurrency is unaffected.
+  const groups = new Map<string, string[]>();
+  for (const tarball of tarballs) {
+    const cached = packageInfoCache.get(tarball);
+    const name = cached?.info.name ?? path.basename(tarball, '.tgz');
+    const list = groups.get(name);
+    if (list) list.push(tarball);
+    else groups.set(name, [tarball]);
+  }
+
   const limit = pLimit(concurrency);
   const progress = new ProgressTracker('Publishing', tarballs.length, preSkippedCount);
   const errors: OperationResult[] = [];
@@ -186,33 +205,35 @@ export async function publishPackages(config: Partial<PublishConfig> = {}): Prom
   let skipped = preSkippedCount;
 
   await Promise.all(
-    tarballs.map((tarball) =>
+    Array.from(groups.values()).map((groupTarballs) =>
       limit(async () => {
-        const cached = packageInfoCache.get(tarball);
-        const packageId = cached?.packageId || path.basename(tarball, '.tgz');
+        for (const tarball of groupTarballs) {
+          const cached = packageInfoCache.get(tarball);
+          const packageId = cached?.packageId || path.basename(tarball, '.tgz');
 
-        // Skip pre-checked existing packages
-        if (skipExisting && cached) {
-          const preCheck = preCheckedPackages.get(packageId);
-          if (preCheck?.exists && preCheck?.certain) {
-            return; // Already counted
+          // Skip pre-checked existing packages
+          if (skipExisting && cached) {
+            const preCheck = preCheckedPackages.get(packageId);
+            if (preCheck?.exists && preCheck?.certain) {
+              continue; // Already counted in preSkippedCount
+            }
           }
-        }
 
-        const result = await publishPackage(tarball, registryUrl, {
-          packageInfo: cached?.info,
-          dryRun,
-        });
+          const result = await publishPackage(tarball, registryUrl, {
+            packageInfo: cached?.info,
+            dryRun,
+          });
 
-        if (result.status === Status.SUCCESS) {
-          published++;
-          progress.success();
-        } else if (result.status === Status.SKIPPED) {
-          skipped++;
-          progress.skip();
-        } else {
-          errors.push(result);
-          progress.fail();
+          if (result.status === Status.SUCCESS) {
+            published++;
+            progress.success();
+          } else if (result.status === Status.SKIPPED) {
+            skipped++;
+            progress.skip();
+          } else {
+            errors.push(result);
+            progress.fail();
+          }
         }
       })
     )
@@ -253,6 +274,7 @@ export async function publishPackages(config: Partial<PublishConfig> = {}): Prom
   }
 
   // Save publish report
+  const orphanErrors = realErrors.filter((e) => e.orphan);
   const report = {
     timestamp: new Date().toISOString(),
     registry: registryUrl,
@@ -261,11 +283,26 @@ export async function publishPackages(config: Partial<PublishConfig> = {}): Prom
     published,
     skipped,
     failed: realErrors.length,
+    orphans: orphanErrors.length,
     errors: realErrors.map((e) => ({
       package: e.package,
       error: e.error,
+      ...(e.orphan ? { orphan: true } : {}),
     })),
   };
+
+  // Orphans are a distinct, actionable failure class — call them out explicitly
+  // so the operator knows server-side storage cleanup (not a re-run) is needed.
+  if (orphanErrors.length > 0) {
+    console.log(
+      chalk.red(
+        `\n⚠ ${orphanErrors.length} ORPHAN(s): tarball on registry storage but version missing from manifest.` +
+          `\n  These cannot be fixed by re-publishing — the orphan tarball must be deleted from the` +
+          `\n  registry host's storage, then re-published. Affected:`
+      )
+    );
+    for (const e of orphanErrors) console.log(chalk.red(`    • ${e.package}`));
+  }
   await fs.writeJson(
     path.join(packagesDir, dryRun ? 'dry-run-report.json' : 'publish-report.json'),
     report,

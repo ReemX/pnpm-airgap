@@ -6,12 +6,13 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
 import type { OperationResult, PackageInfo } from '../types.js';
-import { Status } from '../types.js';
+import { Status, Existence } from '../types.js';
 import { SIZES, RETRY, PRERELEASE_PATTERNS, VERSION_TAG_PREFIX } from '../constants.js';
 import { calculateTimeout, getFileSizeString } from '../utils/files.js';
 import { calculateBackoffDelay, sleep } from '../utils/http.js';
 import { debug } from '../utils/logger.js';
 import { getPackageInfo } from './tarball.js';
+import { packageExists } from './registry.js';
 
 const execAsync = promisify(exec);
 
@@ -162,18 +163,57 @@ export async function publishPackage(
           }
         }
 
-        // Already exists
+        // Conflict (409) — a tarball with this name already exists on the
+        // registry's storage. This is normally a benign "already published",
+        // BUT Verdaccio can leave an ORPHAN: the tarball is on disk while the
+        // version is missing from the package manifest (a raced/partial publish
+        // of concurrent same-package versions). A blind SKIPPED here would mask
+        // that data loss as success. Read the manifest back to tell them apart.
         if (
           errorMessage.includes('409') ||
           errorMessage.includes('conflict') ||
           errorMessage.includes('cannot publish over')
         ) {
+          if (pkgInfo?.name && pkgInfo?.version) {
+            const existence = await packageExists(pkgInfo.name, pkgInfo.version, registryUrl, {
+              useCache: false,
+            });
+            if (existence.status === Existence.NOT_EXISTS) {
+              // Tarball on disk but version absent from manifest = ORPHAN.
+              // Cannot be healed over HTTP (whole-package unpublish leaves the
+              // orphan tgz); needs server-side filesystem cleanup. Surface it.
+              return {
+                status: Status.ERROR,
+                package: packageIdentifier,
+                name: pkgInfo.name,
+                version: pkgInfo.version,
+                orphan: true,
+                error:
+                  `ORPHAN: tarball present on registry storage but ${pkgInfo.name}@${pkgInfo.version} ` +
+                  `is missing from the manifest (raced/partial publish). Cannot be fixed over HTTP — ` +
+                  `delete the orphan tarball for this version from the registry host's storage ` +
+                  `(storage/${pkgInfo.name}/), then republish.`,
+              };
+            }
+            if (existence.status === Existence.UNCERTAIN) {
+              // Couldn't confirm either way (auth/network). Treat as a retryable
+              // error rather than a false skip.
+              return {
+                status: Status.ERROR,
+                package: packageIdentifier,
+                name: pkgInfo.name,
+                version: pkgInfo.version,
+                error: `Conflict (409) but existence is uncertain: ${existence.error || 'unknown'}`,
+              };
+            }
+          }
+          // Version is genuinely present in the manifest — idempotent skip.
           return {
             status: Status.SKIPPED,
             package: packageIdentifier,
             name: pkgInfo?.name,
             version: pkgInfo?.version,
-            reason: 'Already exists (conflict)',
+            reason: 'Already published',
           };
         }
 

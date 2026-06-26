@@ -4,6 +4,8 @@
 
 import http from 'http';
 import https from 'https';
+import path from 'path';
+import os from 'os';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs';
@@ -90,42 +92,101 @@ export function httpRequest(
 }
 
 /**
- * Get authentication token for registry from .npmrc
+ * Get authentication token for a registry.
+ *
+ * Resolves the token so that read-only checks (existence pre-check, manifest
+ * read-back) authenticate identically to `npm publish`. The previous
+ * implementation only scanned the default `userconfig` file, so a token in a
+ * project-level `.npmrc` was invisible — on an auth-gated registry every probe
+ * then 401'd and was treated as "uncertain", silently disabling skip-existing
+ * (so re-runs re-published everything and re-triggered the same-package race).
+ *
+ * Tokens MUST be read from the raw `.npmrc` files: modern npm (9+) *protects*
+ * auth keys, so `npm config get "//host/:_authToken"` errors instead of
+ * returning the value. We therefore scan candidate `.npmrc` files directly, in
+ * npm precedence order (project first), and fall back to env vars:
+ *   1. `./.npmrc` (project — where devs keep the registry token)
+ *   2. `$npm_config_userconfig`, then `npm config get userconfig` (~/.npmrc)
+ *   3. `npm config get globalconfig`, then `~/.npmrc`
+ *   4. `NPM_TOKEN` / `NODE_AUTH_TOKEN` (CI-style)
+ *
+ * `npm config get userconfig|globalconfig` is safe to call — those return file
+ * paths, not protected secrets.
  */
 export async function getAuthToken(registryUrl: string): Promise<string | null> {
   if (authTokenCache.has(registryUrl)) {
     return authTokenCache.get(registryUrl) || null;
   }
 
-  try {
+  const isUsable = (v: string | undefined | null): v is string =>
+    !!v && v.trim() !== '' && v.trim() !== 'undefined' && v.trim() !== 'null';
+
+  const resolveToken = async (): Promise<string | null> => {
     const url = new URL(registryUrl);
     const registryHost = `//${url.host}${url.pathname}`.replace(/\/$/, '');
-    const registryKey = `${registryHost}/:_authToken`;
+    // Both key forms seen in the wild: `//host/path/:_authToken` and `//host/path:_authToken`.
+    const keys = [`${registryHost}/:_authToken`, `${registryHost}:_authToken`];
 
-    const { stdout: userConfigPath } = await execAsync('npm config get userconfig', {
-      timeout: TIMEOUTS.NPM_CONFIG,
-    });
-    const npmrcPath = userConfigPath.trim();
+    // Candidate .npmrc files, highest precedence first.
+    const candidates: string[] = [path.join(process.cwd(), '.npmrc')];
+    if (isUsable(process.env.npm_config_userconfig)) {
+      candidates.push(process.env.npm_config_userconfig);
+    }
+    for (const cfg of ['userconfig', 'globalconfig']) {
+      try {
+        const { stdout } = await execAsync(`npm config get ${cfg}`, { timeout: TIMEOUTS.NPM_CONFIG });
+        const p = stdout.trim();
+        if (isUsable(p)) candidates.push(p);
+      } catch {
+        // ignore — not all environments resolve these
+      }
+    }
+    candidates.push(path.join(os.homedir(), '.npmrc'));
 
-    if (fs.existsSync(npmrcPath)) {
-      const npmrcContent = await fsPromises.readFile(npmrcPath, 'utf8');
-      const lines = npmrcContent.split('\n');
+    const seen = new Set<string>();
+    for (const file of candidates) {
+      if (seen.has(file)) continue;
+      seen.add(file);
+      if (!fs.existsSync(file)) continue;
 
-      for (const line of lines) {
-        if (line.startsWith(registryKey)) {
-          const token = line.split('=')[1]?.trim();
-          if (token) {
-            authTokenCache.set(registryUrl, token);
-            debug(`Found auth token for ${registryUrl}`);
-            return token;
+      let content: string;
+      try {
+        content = await fsPromises.readFile(file, 'utf8');
+      } catch {
+        continue;
+      }
+
+      for (const rawLine of content.split('\n')) {
+        const line = rawLine.trim();
+        for (const key of keys) {
+          if (line.startsWith(`${key}=`)) {
+            let token = line.slice(key.length + 1).trim().replace(/^["']|["']$/g, '');
+            // Resolve a `${NPM_TOKEN}`-style env reference if present.
+            const envRef = token.match(/^\$\{?([A-Z0-9_]+)\}?$/);
+            if (envRef) token = process.env[envRef[1]] ?? '';
+            if (isUsable(token)) {
+              debug(`Found auth token for ${registryUrl} in ${file}`);
+              return token;
+            }
           }
         }
       }
     }
 
-    debug(`No auth token found for ${registryUrl}`);
-    authTokenCache.set(registryUrl, null);
+    const envToken = process.env.NPM_TOKEN || process.env.NODE_AUTH_TOKEN;
+    if (isUsable(envToken)) {
+      debug(`Found auth token for ${registryUrl} (env)`);
+      return envToken;
+    }
+
     return null;
+  };
+
+  try {
+    const token = await resolveToken();
+    authTokenCache.set(registryUrl, token);
+    if (!token) debug(`No auth token found for ${registryUrl}`);
+    return token;
   } catch (error) {
     debug(`Error getting auth token: ${(error as Error).message}`);
     authTokenCache.set(registryUrl, null);

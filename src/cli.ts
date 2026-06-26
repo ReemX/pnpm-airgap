@@ -16,7 +16,7 @@ import { runInteractiveMode } from './ui/interactive.js';
 import { DEFAULT_CONFIG } from './constants.js';
 
 // Version is injected at build time via tsup define
-const packageVersion = process.env.npm_package_version || '2.3.0';
+const packageVersion = process.env.npm_package_version || '2.4.0';
 
 const program = new Command();
 
