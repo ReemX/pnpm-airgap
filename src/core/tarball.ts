@@ -108,7 +108,7 @@ export async function getPackageInfoSimple(tarballPath: string): Promise<Package
 }
 
 export interface DownloadOptions {
-  authToken?: string | null;
+  authHeader?: string | null;
 }
 
 /**
@@ -119,7 +119,7 @@ export async function downloadTarball(
   outputPath: string,
   options: DownloadOptions = {}
 ): Promise<OperationResult> {
-  const { authToken = null } = options;
+  const { authHeader = null } = options;
   const packageId = path.basename(outputPath, '.tgz');
 
   // Skip if already exists
@@ -134,8 +134,8 @@ export async function downloadTarball(
 
   try {
     const headers: Record<string, string> = {};
-    if (authToken) {
-      headers['Authorization'] = `Bearer ${authToken}`;
+    if (authHeader) {
+      headers['Authorization'] = authHeader;
     }
 
     const response = await axios({

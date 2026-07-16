@@ -124,11 +124,15 @@ Options:
 
 Publishing to a private registry has subtle failure modes — `publish` is hardened against them:
 
-- **Authenticated skip-existing.** The existence pre-check now resolves your token exactly like
-  `npm publish` does (`npm config get` across project `.npmrc` / `--userconfig` / globalconfig, plus
-  `NPM_TOKEN` / `NODE_AUTH_TOKEN`). Previously, on an **auth-gated** registry the probe got `401`,
-  every package looked "uncertain", and re-runs silently re-published *everything*. Now an already-
-  populated registry is correctly skipped — re-publish is a true no-op, not a reflush.
+- **Authenticated skip-existing.** The existence pre-check now authenticates exactly like
+  `npm publish` does, covering **every scheme npm supports** — `_authToken` (bearer), `_auth`, and
+  `username` + `_password` (basic, which is what a default Verdaccio `htpasswd` setup writes) — plus
+  `NPM_TOKEN` / `NODE_AUTH_TOKEN`. Credentials are read from the raw `.npmrc` files in npm precedence
+  order (project `.npmrc`, then `--userconfig`, globalconfig, `~/.npmrc`), because npm 9+ *protects*
+  auth keys: `npm config get "//host/:_authToken"` errors instead of returning the value.
+  Previously, on an **auth-gated** registry the probe got `401`, every package looked "uncertain",
+  and re-runs silently re-published *everything*. Now an already-populated registry is correctly
+  skipped — re-publish is a true no-op, not a reflush.
 - **Per-package-name serialization.** Versions of the **same** package are published sequentially
   (different packages still run in parallel up to `--concurrency`). Verdaccio's manifest update is a
   non-atomic read-modify-write; publishing two versions of one package concurrently can race so that
@@ -373,6 +377,20 @@ npm whoami --registry http://localhost:4873
 # Re-login if needed
 npm login --registry http://localhost:4873
 ```
+
+**"Pre-check: 0 exist" on a registry you know is populated.** The pre-check could not authenticate,
+so every probe returned `401` and was recorded as "uncertain" (which counts as "to publish"). The
+run still succeeds — each existing package is skipped on a `409` — but it re-uploads the whole
+closure to find that out. Confirm the credentials the pre-check sees:
+
+```bash
+# Should print 200, not 401
+curl -s -o /dev/null -w "%{http_code}\n" --user "<user>:<pass>" http://localhost:4873/lodash
+```
+
+Then check `.npmrc` has an entry for that exact host (`//host:port/:_authToken=…`, or
+`username` + `_password`). Note the host key must match the registry URL including port. Run with
+`--debug` to see which file the credentials were resolved from.
 
 ### Missing Packages
 

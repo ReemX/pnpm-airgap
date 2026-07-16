@@ -60,7 +60,7 @@ export { unpublishVersion, type UnpublishOptions } from './core/unpublisher.js';
 // Utilities
 export { setDebugMode, debug } from './utils/logger.js';
 export { LRUCache } from './utils/cache.js';
-export { verifyAuth, getAuthToken, httpRequest, clearAuthCache } from './utils/http.js';
+export { verifyAuth, getAuthToken, getAuthHeader, httpRequest, clearAuthCache } from './utils/http.js';
 export { isValidUrl, validateRegistryUrl, validateDirectory, validateFile, isValidVersion } from './utils/validation.js';
 export { getFileSizeString, calculateTimeout, generateFilename } from './utils/files.js';
 

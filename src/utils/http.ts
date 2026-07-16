@@ -17,6 +17,7 @@ const execAsync = promisify(exec);
 
 // Auth token cache
 const authTokenCache = new Map<string, string | null>();
+const authHeaderCache = new Map<string, string | null>();
 
 export interface HttpResponse {
   statusCode: number;
@@ -112,84 +113,162 @@ export function httpRequest(
  *
  * `npm config get userconfig|globalconfig` is safe to call — those return file
  * paths, not protected secrets.
+ *
+ * Returns the bearer token only. Registries configured with *basic* auth
+ * (`username` + `_password`, or `_auth`) have no bearer token — use
+ * {@link getAuthHeader}, which covers every scheme npm supports.
  */
 export async function getAuthToken(registryUrl: string): Promise<string | null> {
   if (authTokenCache.has(registryUrl)) {
     return authTokenCache.get(registryUrl) || null;
   }
 
-  const isUsable = (v: string | undefined | null): v is string =>
-    !!v && v.trim() !== '' && v.trim() !== 'undefined' && v.trim() !== 'null';
-
-  const resolveToken = async (): Promise<string | null> => {
-    const url = new URL(registryUrl);
-    const registryHost = `//${url.host}${url.pathname}`.replace(/\/$/, '');
-    // Both key forms seen in the wild: `//host/path/:_authToken` and `//host/path:_authToken`.
-    const keys = [`${registryHost}/:_authToken`, `${registryHost}:_authToken`];
-
-    // Candidate .npmrc files, highest precedence first.
-    const candidates: string[] = [path.join(process.cwd(), '.npmrc')];
-    if (isUsable(process.env.npm_config_userconfig)) {
-      candidates.push(process.env.npm_config_userconfig);
-    }
-    for (const cfg of ['userconfig', 'globalconfig']) {
-      try {
-        const { stdout } = await execAsync(`npm config get ${cfg}`, { timeout: TIMEOUTS.NPM_CONFIG });
-        const p = stdout.trim();
-        if (isUsable(p)) candidates.push(p);
-      } catch {
-        // ignore — not all environments resolve these
-      }
-    }
-    candidates.push(path.join(os.homedir(), '.npmrc'));
-
-    const seen = new Set<string>();
-    for (const file of candidates) {
-      if (seen.has(file)) continue;
-      seen.add(file);
-      if (!fs.existsSync(file)) continue;
-
-      let content: string;
-      try {
-        content = await fsPromises.readFile(file, 'utf8');
-      } catch {
-        continue;
-      }
-
-      for (const rawLine of content.split('\n')) {
-        const line = rawLine.trim();
-        for (const key of keys) {
-          if (line.startsWith(`${key}=`)) {
-            let token = line.slice(key.length + 1).trim().replace(/^["']|["']$/g, '');
-            // Resolve a `${NPM_TOKEN}`-style env reference if present.
-            const envRef = token.match(/^\$\{?([A-Z0-9_]+)\}?$/);
-            if (envRef) token = process.env[envRef[1]] ?? '';
-            if (isUsable(token)) {
-              debug(`Found auth token for ${registryUrl} in ${file}`);
-              return token;
-            }
-          }
-        }
-      }
-    }
-
-    const envToken = process.env.NPM_TOKEN || process.env.NODE_AUTH_TOKEN;
-    if (isUsable(envToken)) {
-      debug(`Found auth token for ${registryUrl} (env)`);
-      return envToken;
-    }
-
-    return null;
-  };
-
   try {
-    const token = await resolveToken();
+    const keys = await readRegistryNpmrcKeys(registryUrl);
+    const token =
+      keys.get('_authToken') ?? pickUsable(process.env.NPM_TOKEN, process.env.NODE_AUTH_TOKEN);
     authTokenCache.set(registryUrl, token);
     if (!token) debug(`No auth token found for ${registryUrl}`);
     return token;
   } catch (error) {
     debug(`Error getting auth token: ${(error as Error).message}`);
     authTokenCache.set(registryUrl, null);
+    return null;
+  }
+}
+
+const isUsable = (v: string | undefined | null): v is string =>
+  !!v && v.trim() !== '' && v.trim() !== 'undefined' && v.trim() !== 'null';
+
+const pickUsable = (...values: Array<string | undefined | null>): string | null =>
+  values.find(isUsable) ?? null;
+
+/**
+ * Read the auth-related npm config keys scoped to `registryUrl`'s host from the
+ * raw `.npmrc` files.
+ *
+ * npm precedence applies: the first file that defines a key wins, so a
+ * project-level `.npmrc` overrides `~/.npmrc`. Values may be a `${NPM_TOKEN}`
+ * env reference, which is resolved here.
+ *
+ * See {@link getAuthToken} for why these are read from disk rather than via
+ * `npm config get`.
+ */
+async function readRegistryNpmrcKeys(registryUrl: string): Promise<Map<string, string>> {
+  const url = new URL(registryUrl);
+  const registryHost = `//${url.host}${url.pathname}`.replace(/\/$/, '');
+  const authKeys = ['_authToken', '_auth', 'username', '_password'];
+
+  // Candidate .npmrc files, highest precedence first.
+  const candidates: string[] = [path.join(process.cwd(), '.npmrc')];
+  if (isUsable(process.env.npm_config_userconfig)) {
+    candidates.push(process.env.npm_config_userconfig);
+  }
+  for (const cfg of ['userconfig', 'globalconfig']) {
+    try {
+      const { stdout } = await execAsync(`npm config get ${cfg}`, { timeout: TIMEOUTS.NPM_CONFIG });
+      const p = stdout.trim();
+      if (isUsable(p)) candidates.push(p);
+    } catch {
+      // ignore — not all environments resolve these
+    }
+  }
+  candidates.push(path.join(os.homedir(), '.npmrc'));
+
+  const found = new Map<string, string>();
+  const seen = new Set<string>();
+
+  for (const file of candidates) {
+    if (seen.has(file)) continue;
+    seen.add(file);
+    if (!fs.existsSync(file)) continue;
+
+    let content: string;
+    try {
+      content = await fsPromises.readFile(file, 'utf8');
+    } catch {
+      continue;
+    }
+
+    for (const rawLine of content.split('\n')) {
+      const line = rawLine.trim();
+      for (const authKey of authKeys) {
+        if (found.has(authKey)) continue; // first file wins
+        // Both key forms seen in the wild: `//host/path/:key` and `//host/path:key`.
+        for (const key of [`${registryHost}/:${authKey}`, `${registryHost}:${authKey}`]) {
+          if (!line.startsWith(`${key}=`)) continue;
+          let value = line
+            .slice(key.length + 1)
+            .trim()
+            .replace(/^["']|["']$/g, '');
+          // Resolve a `${NPM_TOKEN}`-style env reference if present.
+          const envRef = value.match(/^\$\{?([A-Z0-9_]+)\}?$/);
+          if (envRef) value = process.env[envRef[1]] ?? '';
+          if (isUsable(value)) {
+            debug(`Found ${authKey} for ${registryUrl} in ${file}`);
+            found.set(authKey, value);
+          }
+        }
+      }
+    }
+  }
+
+  return found;
+}
+
+/**
+ * Resolve the full `Authorization` header value for a registry, covering every
+ * auth scheme npm supports — not just bearer tokens.
+ *
+ * This exists because read-only probes MUST authenticate identically to
+ * `npm publish`. A basic-auth registry (Verdaccio's default `htpasswd` setup
+ * uses `username` + `_password`) has no `_authToken` at all, so a bearer-only
+ * resolver sends no header, every probe 401s, and the existence pre-check
+ * degrades to "uncertain" — silently disabling skip-existing and re-publishing
+ * the whole closure on every run.
+ *
+ * Precedence matches npm: `_authToken` (bearer), then `_auth`, then
+ * `username` + `_password` (both basic).
+ *
+ * @returns e.g. `Bearer abc123` or `Basic dXNlcjpwYXNz`, or null if the
+ *   registry has no configured credentials.
+ */
+export async function getAuthHeader(registryUrl: string): Promise<string | null> {
+  if (authHeaderCache.has(registryUrl)) {
+    return authHeaderCache.get(registryUrl) || null;
+  }
+
+  const resolve = async (): Promise<string | null> => {
+    const keys = await readRegistryNpmrcKeys(registryUrl);
+
+    const token =
+      keys.get('_authToken') ?? pickUsable(process.env.NPM_TOKEN, process.env.NODE_AUTH_TOKEN);
+    if (isUsable(token)) return `Bearer ${token}`;
+
+    // `_auth` is already base64("user:pass").
+    const auth = keys.get('_auth');
+    if (isUsable(auth)) return `Basic ${auth}`;
+
+    // `username` + `_password`, where `_password` is base64-encoded.
+    const username = keys.get('username');
+    const password = keys.get('_password');
+    if (isUsable(username) && isUsable(password)) {
+      const decoded = Buffer.from(password, 'base64').toString('utf8');
+      return `Basic ${Buffer.from(`${username}:${decoded}`, 'utf8').toString('base64')}`;
+    }
+
+    return null;
+  };
+
+  try {
+    const header = await resolve();
+    authHeaderCache.set(registryUrl, header);
+    if (!header) debug(`No credentials found for ${registryUrl}`);
+    else debug(`Resolved ${header.split(' ')[0]} auth for ${registryUrl}`);
+    return header;
+  } catch (error) {
+    debug(`Error resolving auth header: ${(error as Error).message}`);
+    authHeaderCache.set(registryUrl, null);
     return null;
   }
 }
@@ -237,4 +316,5 @@ export function sleep(ms: number): Promise<void> {
  */
 export function clearAuthCache(): void {
   authTokenCache.clear();
+  authHeaderCache.clear();
 }

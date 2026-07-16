@@ -6,7 +6,7 @@ import axios from 'axios';
 import { Existence, type ExistenceResult } from '../types.js';
 import { TIMEOUTS, RETRY, CACHE, BLOCKED_REGISTRIES } from '../constants.js';
 import { LRUCache } from '../utils/cache.js';
-import { httpRequest, getAuthToken, calculateBackoffDelay, sleep } from '../utils/http.js';
+import { httpRequest, getAuthHeader, calculateBackoffDelay, sleep } from '../utils/http.js';
 import { debug } from '../utils/logger.js';
 
 // Package existence cache
@@ -40,10 +40,10 @@ export async function packageExists(
     : encodeURIComponent(name);
   const packageUrl = `${registryUrl.replace(/\/$/, '')}/${encodedName}`;
 
-  const authToken = await getAuthToken(registryUrl);
+  const authHeader = await getAuthHeader(registryUrl);
   const headers: Record<string, string> = {};
-  if (authToken) {
-    headers['Authorization'] = `Bearer ${authToken}`;
+  if (authHeader) {
+    headers['Authorization'] = authHeader;
   }
 
   let lastError: string | null = null;
@@ -137,9 +137,9 @@ export interface PackageMetadata {
 export async function getPackageMetadata(
   packageName: string,
   registryUrl: string,
-  options: { authToken?: string | null } = {}
+  options: { authHeader?: string | null } = {}
 ): Promise<PackageMetadata | null> {
-  const { authToken = null } = options;
+  const { authHeader = null } = options;
 
   const encodedName = packageName.startsWith('@')
     ? `@${encodeURIComponent(packageName.slice(1))}`
@@ -150,8 +150,8 @@ export async function getPackageMetadata(
   const headers: Record<string, string> = {
     Accept: 'application/json',
   };
-  if (authToken) {
-    headers['Authorization'] = `Bearer ${authToken}`;
+  if (authHeader) {
+    headers['Authorization'] = authHeader;
   }
 
   try {
@@ -173,13 +173,13 @@ export async function getPackageMetadata(
  */
 export async function listAllPackages(
   registryUrl: string,
-  options: { scope?: string | null; authToken?: string | null } = {}
+  options: { scope?: string | null; authHeader?: string | null } = {}
 ): Promise<Map<string, PackageMetadata>> {
-  const { scope = null, authToken = null } = options;
+  const { scope = null, authHeader = null } = options;
 
   const headers: Record<string, string> = {};
-  if (authToken) {
-    headers['Authorization'] = `Bearer ${authToken}`;
+  if (authHeader) {
+    headers['Authorization'] = authHeader;
   }
 
   const packages = new Map<string, PackageMetadata>();

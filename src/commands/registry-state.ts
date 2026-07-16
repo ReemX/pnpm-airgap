@@ -10,7 +10,7 @@ import type { RegistryStateConfig, RegistryState, LockfilePackage } from '../typ
 import { DEFAULT_CONFIG } from '../constants.js';
 import { listAllPackages, getPackageMetadata } from '../core/registry.js';
 import { parseLockfile } from '../core/lockfile.js';
-import { getAuthToken } from '../utils/http.js';
+import { getAuthHeader } from '../utils/http.js';
 import { setDebugMode, debug } from '../utils/logger.js';
 import { isValidUrl, validateFile } from '../utils/validation.js';
 import { createSpinner, printHeader, printInfo } from '../ui/progress.js';
@@ -148,8 +148,8 @@ export async function exportRegistryState(config: Partial<RegistryStateConfig> =
     printInfo('Scope', scope);
   }
 
-  const authToken = await getAuthToken(registryUrl);
-  if (authToken) {
+  const authHeader = await getAuthHeader(registryUrl);
+  if (authHeader) {
     debug('Found auth token for registry');
   }
 
@@ -158,7 +158,7 @@ export async function exportRegistryState(config: Partial<RegistryStateConfig> =
   let packageList: Map<string, { name: string; versions: Record<string, unknown> }>;
 
   try {
-    packageList = await listAllPackages(registryUrl, { scope, authToken });
+    packageList = await listAllPackages(registryUrl, { scope, authHeader });
     listSpinner.succeed(`Found ${packageList.size} packages`);
   } catch (error) {
     listSpinner.fail('Failed to list packages');
@@ -194,7 +194,7 @@ export async function exportRegistryState(config: Partial<RegistryStateConfig> =
     packageNames.map((name) =>
       limit(async () => {
         try {
-          const metadata = await getPackageMetadata(name, registryUrl, { authToken });
+          const metadata = await getPackageMetadata(name, registryUrl, { authHeader });
 
           if (metadata?.versions) {
             const versions = Object.keys(metadata.versions);

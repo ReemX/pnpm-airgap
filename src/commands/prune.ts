@@ -23,7 +23,7 @@ import { CONCURRENCY } from '../constants.js';
 import { listAllPackages, getPackageMetadata } from '../core/registry.js';
 import { parseLockfile } from '../core/lockfile.js';
 import { unpublishVersion } from '../core/unpublisher.js';
-import { getAuthToken } from '../utils/http.js';
+import { getAuthHeader } from '../utils/http.js';
 import { setDebugMode, debug } from '../utils/logger.js';
 import { isValidUrl, validateFile } from '../utils/validation.js';
 import { createSpinner, printHeader, printInfo } from '../ui/progress.js';
@@ -77,17 +77,17 @@ async function buildKeepSet(lockfiles: string[]): Promise<Map<string, Set<string
 /** Fetch current registry contents (name -> versions[]). */
 async function fetchRegistryVersions(
   registryUrl: string,
-  authToken: string | null,
+  authHeader: string | null,
   concurrency: number
 ): Promise<Map<string, string[]>> {
-  const packageList = await listAllPackages(registryUrl, { authToken });
+  const packageList = await listAllPackages(registryUrl, { authHeader });
   const result = new Map<string, string[]>();
   const limit = pLimit(concurrency);
 
   await Promise.all(
     Array.from(packageList.keys()).map((name) =>
       limit(async () => {
-        const metadata = await getPackageMetadata(name, registryUrl, { authToken });
+        const metadata = await getPackageMetadata(name, registryUrl, { authHeader });
         result.set(name, metadata?.versions ? Object.keys(metadata.versions) : []);
       })
     )
@@ -120,8 +120,8 @@ export async function prunePackages(config: Partial<PruneConfig> = {}): Promise<
 
   // 2. current registry contents
   const regSpinner = createSpinner('Reading registry state...');
-  const authToken = await getAuthToken(registryUrl);
-  const registry = await fetchRegistryVersions(registryUrl, authToken, concurrency);
+  const authHeader = await getAuthHeader(registryUrl);
+  const registry = await fetchRegistryVersions(registryUrl, authHeader, concurrency);
   const regVersionTotal = Array.from(registry.values()).reduce((s, v) => s + v.length, 0);
   regSpinner.succeed(`Registry: ${registry.size} packages, ${regVersionTotal} versions`);
 

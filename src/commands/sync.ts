@@ -12,7 +12,7 @@ import { CONCURRENCY, DEFAULT_CONFIG } from '../constants.js';
 import { listAllPackages, getPackageMetadata, packageExists, isPublicRegistry } from '../core/registry.js';
 import { downloadTarball, getPackageInfo } from '../core/tarball.js';
 import { publishPackage } from '../core/publisher.js';
-import { getAuthToken, verifyAuth } from '../utils/http.js';
+import { getAuthHeader, verifyAuth } from '../utils/http.js';
 import { setDebugMode, debug } from '../utils/logger.js';
 import { validateRegistryUrl } from '../utils/validation.js';
 import { generateFilename } from '../utils/files.js';
@@ -92,8 +92,8 @@ export async function syncRegistries(config: Partial<SyncConfig> = {}): Promise<
 
   await fs.ensureDir(outputDir);
 
-  const sourceAuthToken = await getAuthToken(sourceRegistry);
-  if (sourceAuthToken) debug('Found auth token for source registry');
+  const sourceAuthHeader = await getAuthHeader(sourceRegistry);
+  if (sourceAuthHeader) debug('Found credentials for source registry');
 
   // Get list of packages to sync
   const packagesToSync = new Map<string, { name: string; tarballs?: TarballInfo[] }>();
@@ -141,7 +141,7 @@ export async function syncRegistries(config: Partial<SyncConfig> = {}): Promise<
     const spinner = createSpinner('Fetching package list from source...');
 
     try {
-      const list = await listAllPackages(sourceRegistry, { scope, authToken: sourceAuthToken });
+      const list = await listAllPackages(sourceRegistry, { scope, authHeader: sourceAuthHeader });
       for (const [name] of list) {
         packagesToSync.set(name, { name });
       }
@@ -170,7 +170,7 @@ export async function syncRegistries(config: Partial<SyncConfig> = {}): Promise<
       Array.from(packagesToSync.entries()).map(([name]) =>
         limit(async () => {
           try {
-            const metadata = await getPackageMetadata(name, sourceRegistry, { authToken: sourceAuthToken });
+            const metadata = await getPackageMetadata(name, sourceRegistry, { authHeader: sourceAuthHeader });
 
             if (!metadata?.versions) {
               processed++;
@@ -214,7 +214,7 @@ export async function syncRegistries(config: Partial<SyncConfig> = {}): Promise<
                 continue;
               }
 
-              const result = await downloadTarball(versionData.dist.tarball, outputPath, { authToken: sourceAuthToken });
+              const result = await downloadTarball(versionData.dist.tarball, outputPath, { authHeader: sourceAuthHeader });
 
               if (result.status === Status.SUCCESS) {
                 downloadResults.downloaded++;
