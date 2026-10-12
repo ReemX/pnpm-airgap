@@ -323,7 +323,8 @@ function npmPrefix(): string {
  * the whole closure on every run.
  *
  * Precedence matches npm: `_authToken` (bearer), then `_auth`, then
- * `username` + `_password` (both basic).
+ * `username` + `_password` (both basic), then the unscoped `NPM_TOKEN` /
+ * `NODE_AUTH_TOKEN` env vars.
  *
  * @returns e.g. `Bearer abc123` or `Basic dXNlcjpwYXNz`, or null if the
  *   registry has no configured credentials.
@@ -336,8 +337,7 @@ export async function getAuthHeader(registryUrl: string): Promise<string | null>
   const resolve = async (): Promise<string | null> => {
     const keys = await readRegistryNpmrcKeys(registryUrl);
 
-    const token =
-      keys.get('_authToken') ?? pickUsable(process.env.NPM_TOKEN, process.env.NODE_AUTH_TOKEN);
+    const token = keys.get('_authToken');
     if (isUsable(token)) return `Bearer ${token}`;
 
     // `_auth` is already base64("user:pass").
@@ -351,6 +351,11 @@ export async function getAuthHeader(registryUrl: string): Promise<string | null>
       const decoded = Buffer.from(password, 'base64').toString('utf8');
       return `Basic ${Buffer.from(`${username}:${decoded}`, 'utf8').toString('base64')}`;
     }
+
+    // Generic CI tokens last: they are not scoped to this registry (setup-node
+    // exports a placeholder NODE_AUTH_TOKEN), so explicit credentials win.
+    const envToken = pickUsable(process.env.NPM_TOKEN, process.env.NODE_AUTH_TOKEN);
+    if (envToken) return `Bearer ${envToken}`;
 
     return null;
   };

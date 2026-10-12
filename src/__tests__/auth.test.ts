@@ -142,3 +142,23 @@ describe('getAuthToken', () => {
     await expect(getAuthToken(REGISTRY)).resolves.toBeNull();
   });
 });
+
+describe('getAuthHeader precedence over generic env tokens', () => {
+  it('prefers registry-scoped basic credentials over NODE_AUTH_TOKEN', async () => {
+    writeNpmrc([`//army-server-dev:4873/:username=admin`, `//army-server-dev:4873/:_password=${b64('s3cret')}`].join('\n'));
+    process.env.NODE_AUTH_TOKEN = 'XXXXX-XXXXX-XXXXX-XXXXX';
+    expect(await getAuthHeader(REGISTRY)).toBe(`Basic ${b64('admin:s3cret')}`);
+  });
+
+  it('reads npm_config__auth from the environment', async () => {
+    writeNpmrc('');
+    process.env.npm_config__auth = b64('admin:envpw');
+    expect(await getAuthHeader(REGISTRY)).toBe(`Basic ${b64('admin:envpw')}`);
+  });
+
+  it('falls back to NPM_TOKEN when nothing else is configured', async () => {
+    writeNpmrc('');
+    process.env.NPM_TOKEN = 'tok';
+    expect(await getAuthHeader(REGISTRY)).toBe('Bearer tok');
+  });
+});
