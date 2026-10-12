@@ -10,6 +10,7 @@ import fs from 'fs';
 import http from 'http';
 import os from 'os';
 import path from 'path';
+import zlib from 'zlib';
 import * as tar from 'tar';
 import { readTarball } from '../core/tarball.js';
 import { buildVersionManifest, compareVersions, publishPackage } from '../core/publisher.js';
@@ -30,6 +31,49 @@ async function makeTarball(name: string, files: Record<string, string>, root = '
   const out = path.join(tmpDir, `${name}.tgz`);
   await tar.c({ gzip: true, file: out, cwd: src, portable: true }, [root]);
   return out;
+}
+
+/** One ustar header block. */
+function tarHeader(name: string, size: number, type: string): Buffer {
+  const h = Buffer.alloc(512);
+  h.write(name.slice(0, 100), 0, 'utf8');
+  h.write('0000644\0', 100);
+  h.write('0000000\0', 108);
+  h.write('0000000\0', 116);
+  h.write(size.toString(8).padStart(11, '0') + '\0', 124);
+  h.write('00000000000\0', 136);
+  h.write(type, 156);
+  h.write('ustar\0', 257);
+  h.write('00', 263);
+  h.fill(' ', 148, 156);
+  let sum = 0;
+  for (const b of h) sum += b;
+  h.write(sum.toString(8).padStart(6, '0') + '\0 ', 148);
+  return h;
+}
+
+/**
+ * Build a gzipped tarball entirely in memory. Paths over 100 bytes get a pax
+ * `path=` record, like npm's packer. Avoids writing thousands of fixture files,
+ * which is slow on Windows (the very problem this reader exists to avoid).
+ */
+function makeTarballInMemory(files: Record<string, string>, root = 'package'): Buffer {
+  const blocks: Buffer[] = [];
+  const pad = (len: number) => Buffer.alloc((512 - (len % 512)) % 512);
+  for (const [rel, content] of Object.entries(files)) {
+    const name = `${root}/${rel}`;
+    const data = Buffer.from(content);
+    if (Buffer.byteLength(name) > 100) {
+      const body = ` path=${name}\n`;
+      let record = `${body.length}${body}`;
+      record = `${record.length}${body}`;
+      const pax = Buffer.from(record);
+      blocks.push(tarHeader('PaxHeader', pax.length, 'x'), pax, pad(pax.length));
+    }
+    blocks.push(tarHeader(name, data.length, '0'), data, pad(data.length));
+  }
+  blocks.push(Buffer.alloc(1024));
+  return zlib.gzipSync(Buffer.concat(blocks));
 }
 
 beforeAll(() => {
@@ -53,15 +97,23 @@ describe('readTarball', () => {
     expect(contents.readmeFilename).toBe('README.md');
   });
 
-  it('handles thousands of entries and very long paths (pax/GNU headers)', async () => {
-    const files: Record<string, string> = {
-      'package.json': JSON.stringify({ name: 'many', version: '2.0.0' }),
-    };
+  it('handles thousands of entries and very long paths (pax headers)', async () => {
+    const files: Record<string, string> = {};
     for (let i = 0; i < 3000; i++) files[`icons/icon-${i}.svg`] = `<svg>${i}</svg>`;
     files[`${'deep/'.repeat(40)}file.txt`] = 'x';
-    const file = await makeTarball('many', files);
-    const contents = await readTarball(fs.readFileSync(file), { readme: false });
+    files['package.json'] = JSON.stringify({ name: 'many', version: '2.0.0' });
+    files['README.md'] = '# many';
+    const contents = await readTarball(makeTarballInMemory(files));
     expect(contents.manifest.name).toBe('many');
+    expect(contents.readme).toBe('# many');
+  });
+
+  it('reads a package.json whose own path needs a pax header', async () => {
+    const root = `r${'x'.repeat(95)}`;
+    const contents = await readTarball(
+      makeTarballInMemory({ 'package.json': JSON.stringify({ name: 'longroot', version: '1.0.0' }) }, root)
+    );
+    expect(contents.manifest.name).toBe('longroot');
   });
 
   it('ignores nested package.json files and accepts a non-"package" root', async () => {
