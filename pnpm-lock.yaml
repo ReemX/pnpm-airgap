@@ -32,9 +32,6 @@ importers:
       p-limit:
         specifier: ^7.2.0
         version: 7.2.0
-      tar:
-        specifier: ^7.5.2
-        version: 7.5.2
     devDependencies:
       '@eslint/js':
         specifier: ^9.39.2
@@ -54,6 +51,9 @@ importers:
       prettier:
         specifier: ^3.7.4
         version: 3.7.4
+      tar:
+        specifier: ^7.5.2
+        version: 7.5.2
       tsup:
         specifier: ^8.5.1
         version: 8.5.1(postcss@8.5.6)(typescript@5.9.3)

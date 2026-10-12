@@ -16,7 +16,7 @@ import { runInteractiveMode } from './ui/interactive.js';
 import { DEFAULT_CONFIG } from './constants.js';
 
 // Version is injected at build time via tsup define
-const packageVersion = process.env.npm_package_version || '2.4.0';
+const packageVersion = process.env.npm_package_version || '2.5.0';
 
 const program = new Command();
 
@@ -67,7 +67,8 @@ program
   .option('-c, --config <path>', 'Path to config file')
   .option('-p, --packages <path>', 'Path to packages directory')
   .option('-r, --registry <url>', 'Registry URL')
-  .option('--concurrency <number>', 'Concurrent publishes', parseInt)
+  .option('--concurrency <number>', 'Concurrent publishes (default: 8)', parseInt)
+  .option('--timeout <seconds>', 'Abandon a publish after this many seconds with no activity (0 = never, default: 300)', parseInt)
   .option('--no-skip-existing', 'Publish all packages even if they exist')
   .option('--dry-run', 'Show what would be published')
   .option('--debug', 'Enable debug output')
@@ -80,6 +81,7 @@ program
         ...(options.packages && { packagesDir: options.packages }),
         ...(options.registry && { registryUrl: options.registry }),
         ...(options.concurrency && { concurrency: options.concurrency }),
+        ...(options.timeout !== undefined && !Number.isNaN(options.timeout) && { timeout: options.timeout }),
         skipExisting: options.skipExisting !== false,
         ...(options.dryRun && { dryRun: true }),
         ...(options.debug && { debug: true }),

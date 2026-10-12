@@ -1,6 +1,6 @@
 {
   "name": "pnpm-airgap",
-  "version": "2.4.0",
+  "version": "2.5.0",
   "description": "Transfer pnpm project dependencies between online and offline environments",
   "type": "module",
   "main": "dist/index.js",
@@ -45,6 +45,7 @@
   "files": [
     "dist"
   ],
+  "packageManager": "pnpm@11.24.0",
   "engines": {
     "node": ">=18.0.0"
   },
@@ -56,8 +57,7 @@
     "fs-extra": "^11.3.3",
     "js-yaml": "^4.1.1",
     "ora": "^9.0.0",
-    "p-limit": "^7.2.0",
-    "tar": "^7.5.2"
+    "p-limit": "^7.2.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.2",
@@ -66,6 +66,7 @@
     "@types/node": "^25.0.3",
     "eslint": "^9.39.2",
     "prettier": "^3.7.4",
+    "tar": "^7.5.2",
     "tsup": "^8.5.1",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.50.0",

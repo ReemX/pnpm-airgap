@@ -174,7 +174,7 @@ async function interactiveFetch(): Promise<void> {
 
   const concurrency = await input({
     message: 'Concurrency (parallel downloads):',
-    default: String(config.fetch.concurrency || 5),
+    default: String(config.fetch.concurrency || 16),
     theme,
     validate: (value) => {
       const num = parseInt(value, 10);
@@ -286,7 +286,7 @@ async function interactivePublish(): Promise<void> {
 
   const concurrency = await input({
     message: 'Concurrency (parallel publishes):',
-    default: String(config.publish.concurrency || 3),
+    default: String(config.publish.concurrency || 8),
     theme,
     validate: (value) => {
       const num = parseInt(value, 10);

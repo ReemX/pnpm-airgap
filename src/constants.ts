@@ -12,13 +12,14 @@ export const TIMEOUTS = {
   NPM_CONFIG: 2_000, // 2 seconds for npm config commands
   DOWNLOAD: 30_000, // 30 seconds for package downloads
   PACKAGE_INFO: 2_000, // 2 seconds for extracting package info
+  PUBLISH_IDLE: 300_000, // 5 minutes with no bytes moving before a publish is abandoned
 } as const;
 
 // Concurrency limits
 export const CONCURRENCY = {
   PUBLISH: 5,
   PUBLISH_LOW: 3,
-  PRE_CHECK: 10,
+  PRE_CHECK: 16,
   FETCH: 5,
   VERIFY: 10,
   PACKAGE_INFO: 15,
@@ -126,7 +127,7 @@ export const DEFAULT_CONFIG: {
   fetch: {
     lockfilePath: './pnpm-lock.yaml',
     outputDir: './airgap-packages',
-    concurrency: 5,
+    concurrency: 16,
     registryUrl: 'https://registry.npmjs.org',
     registryStatePath: null,
     skipOptional: false,
@@ -135,7 +136,7 @@ export const DEFAULT_CONFIG: {
   publish: {
     packagesDir: './airgap-packages',
     registryUrl: 'http://localhost:4873',
-    concurrency: 3,
+    concurrency: 8,
     skipExisting: true,
     dryRun: false,
     debug: false,

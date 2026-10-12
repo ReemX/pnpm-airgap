@@ -26,6 +26,78 @@ export interface HttpResponse {
 }
 
 /**
+ * Shared keep-alive agents. Every registry call (existence probes, publishes,
+ * downloads) reuses pooled sockets instead of paying a TCP (and TLS) handshake
+ * per request, which dominates on a slow or high-latency registry.
+ */
+export const httpAgent = new http.Agent({ keepAlive: true, maxSockets: 64, keepAliveMsecs: 10_000 });
+export const httpsAgent = new https.Agent({ keepAlive: true, maxSockets: 64, keepAliveMsecs: 10_000 });
+
+export function agentFor(url: string | URL): http.Agent {
+  return new URL(url).protocol === 'https:' ? httpsAgent : httpAgent;
+}
+
+export interface RequestOptions {
+  method?: string;
+  headers?: Record<string, string>;
+  body?: Buffer | string;
+  /**
+   * Socket inactivity timeout in ms: the request fails only when no bytes move
+   * for this long. A large upload or a slow server that is still working is
+   * never cut off by a wall-clock budget. 0 disables it.
+   */
+  idleTimeout?: number;
+}
+
+/**
+ * Send one HTTP request with a pooled keep-alive socket and collect the body.
+ * Never rejects on an HTTP status; callers inspect `statusCode`.
+ */
+export function request(url: string, options: RequestOptions = {}): Promise<HttpResponse> {
+  const { method = 'GET', headers = {}, body, idleTimeout = TIMEOUTS.HTTP_REQUEST } = options;
+
+  return new Promise((resolve, reject) => {
+    const parsedUrl = new URL(url);
+    const httpModule = parsedUrl.protocol === 'https:' ? https : http;
+    const finalHeaders: Record<string, string | number> = { ...headers };
+    if (body !== undefined) finalHeaders['Content-Length'] = Buffer.byteLength(body);
+
+    debug(`HTTP ${method} ${url}`);
+
+    const req = httpModule.request(
+      parsedUrl,
+      { method, headers: finalHeaders, agent: agentFor(parsedUrl) },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (chunk: Buffer) => chunks.push(chunk));
+        res.on('end', () =>
+          resolve({
+            statusCode: res.statusCode || 0,
+            data: Buffer.concat(chunks).toString('utf8'),
+            headers: res.headers,
+          })
+        );
+        res.on('error', reject);
+      }
+    );
+
+    if (idleTimeout > 0) {
+      req.setTimeout(idleTimeout, () => {
+        req.destroy(new Error(`Request timed out (no activity for ${Math.round(idleTimeout / 1000)}s)`));
+      });
+    }
+
+    req.on('error', (error) => {
+      debug(`HTTP ${method} error: ${error.message}`);
+      reject(error);
+    });
+
+    if (body !== undefined) req.end(body);
+    else req.end();
+  });
+}
+
+/**
  * Make HTTP/HTTPS request with redirect support
  */
 export function httpRequest(
@@ -40,6 +112,7 @@ export function httpRequest(
     const requestOptions = {
       timeout: options.timeout || TIMEOUTS.HTTP_REQUEST,
       headers: options.headers || {},
+      agent: agentFor(parsedUrl),
     };
 
     debug(`HTTP GET ${url}`);
@@ -61,20 +134,21 @@ export function httpRequest(
         const redirectUrl = new URL(res.headers.location, url).toString();
         debug(`Following redirect to ${redirectUrl}`);
 
+        res.resume();
         httpRequest(redirectUrl, options, maxRedirects - 1)
           .then(resolve)
           .catch(reject);
         return;
       }
 
-      let data = '';
-      res.on('data', (chunk) => {
-        data += chunk;
+      const chunks: Buffer[] = [];
+      res.on('data', (chunk: Buffer) => {
+        chunks.push(chunk);
       });
       res.on('end', () => {
         resolve({
           statusCode: res.statusCode || 0,
-          data,
+          data: Buffer.concat(chunks).toString('utf8'),
           headers: res.headers,
         });
       });
@@ -107,12 +181,10 @@ export function httpRequest(
  * returning the value. We therefore scan candidate `.npmrc` files directly, in
  * npm precedence order (project first), and fall back to env vars:
  *   1. `./.npmrc` (project — where devs keep the registry token)
- *   2. `$npm_config_userconfig`, then `npm config get userconfig` (~/.npmrc)
- *   3. `npm config get globalconfig`, then `~/.npmrc`
- *   4. `NPM_TOKEN` / `NODE_AUTH_TOKEN` (CI-style)
- *
- * `npm config get userconfig|globalconfig` is safe to call — those return file
- * paths, not protected secrets.
+ *   2. `$npm_config_userconfig`, then `~/.npmrc`
+ *   3. `$npm_config_globalconfig`, else npm's default `<prefix>/etc/npmrc`
+ *   4. `npm_config_*` env vars (`npm_config__auth`, ...)
+ *   5. `NPM_TOKEN` / `NODE_AUTH_TOKEN` (CI-style)
  *
  * Returns the bearer token only. Registries configured with *basic* auth
  * (`username` + `_password`, or `_auth`) have no bearer token — use
@@ -143,6 +215,7 @@ const isUsable = (v: string | undefined | null): v is string =>
 const pickUsable = (...values: Array<string | undefined | null>): string | null =>
   values.find(isUsable) ?? null;
 
+
 /**
  * Read the auth-related npm config keys scoped to `registryUrl`'s host from the
  * raw `.npmrc` files.
@@ -159,21 +232,15 @@ async function readRegistryNpmrcKeys(registryUrl: string): Promise<Map<string, s
   const registryHost = `//${url.host}${url.pathname}`.replace(/\/$/, '');
   const authKeys = ['_authToken', '_auth', 'username', '_password'];
 
-  // Candidate .npmrc files, highest precedence first.
+  // Candidate .npmrc files, highest precedence first. The user/global paths
+  // are resolved the way npm resolves them instead of spawning
+  // `npm config get` twice (a cold npm start costs ~0.5-2s each, more on
+  // Windows).
   const candidates: string[] = [path.join(process.cwd(), '.npmrc')];
-  if (isUsable(process.env.npm_config_userconfig)) {
-    candidates.push(process.env.npm_config_userconfig);
-  }
-  for (const cfg of ['userconfig', 'globalconfig']) {
-    try {
-      const { stdout } = await execAsync(`npm config get ${cfg}`, { timeout: TIMEOUTS.NPM_CONFIG });
-      const p = stdout.trim();
-      if (isUsable(p)) candidates.push(p);
-    } catch {
-      // ignore — not all environments resolve these
-    }
-  }
+  const userconfig = npmEnv('userconfig');
+  if (isUsable(userconfig)) candidates.push(userconfig);
   candidates.push(path.join(os.homedir(), '.npmrc'));
+  candidates.push(npmEnv('globalconfig') ?? path.join(npmPrefix(), 'etc', 'npmrc'));
 
   const found = new Map<string, string>();
   const seen = new Set<string>();
@@ -213,7 +280,35 @@ async function readRegistryNpmrcKeys(registryUrl: string): Promise<Map<string, s
     }
   }
 
+  // npm also takes config from `npm_config_*` env vars (what CI and wrapper
+  // scripts use, e.g. `npm_config__auth`). Fill in whatever the files lacked.
+  for (const authKey of authKeys) {
+    if (found.has(authKey)) continue;
+    const value = npmEnv(`${registryHost}/:${authKey}`) ?? npmEnv(`${registryHost}:${authKey}`) ?? npmEnv(authKey);
+    if (isUsable(value)) {
+      debug(`Found ${authKey} for ${registryUrl} in environment`);
+      found.set(authKey, value);
+    }
+  }
+
   return found;
+}
+
+/** Read an `npm_config_<key>` env var the way npm does (case-insensitive). */
+function npmEnv(key: string): string | undefined {
+  const wanted = `npm_config_${key}`.toLowerCase();
+  for (const [name, value] of Object.entries(process.env)) {
+    if (name.toLowerCase() === wanted && isUsable(value)) return value;
+  }
+  return undefined;
+}
+
+/** npm's default prefix: next to node.exe on Windows, one level up elsewhere. */
+function npmPrefix(): string {
+  const fromEnv = npmEnv('prefix');
+  if (fromEnv) return fromEnv;
+  const nodeDir = path.dirname(process.execPath);
+  return process.platform === 'win32' ? nodeDir : path.dirname(nodeDir);
 }
 
 /**
@@ -274,9 +369,29 @@ export async function getAuthHeader(registryUrl: string): Promise<string | null>
 }
 
 /**
- * Verify authentication to registry
+ * Verify authentication to registry.
+ *
+ * Asks the registry directly (`GET /-/whoami`) with the same credentials the
+ * publishes will use, instead of spawning `npm whoami`. Falls back to the npm
+ * CLI only if the registry has no whoami endpoint.
  */
 export async function verifyAuth(registryUrl: string): Promise<string> {
+  const authHeader = await getAuthHeader(registryUrl);
+  if (authHeader) {
+    try {
+      const res = await request(`${registryUrl.replace(/\/$/, '')}/-/whoami`, {
+        headers: { Authorization: authHeader, Accept: 'application/json' },
+      });
+      if (res.statusCode === 200) {
+        const username = (JSON.parse(res.data) as { username?: string }).username;
+        if (username) return username;
+      }
+      debug(`whoami returned HTTP ${res.statusCode}`);
+    } catch (error) {
+      debug(`whoami request failed: ${(error as Error).message}`);
+    }
+  }
+
   try {
     const { stdout } = await execAsync(`npm whoami --registry "${registryUrl}"`, {
       timeout: TIMEOUTS.HTTP_REQUEST,

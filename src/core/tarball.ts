@@ -5,75 +5,206 @@
 import fs from 'fs-extra';
 import path from 'path';
 import axios from 'axios';
-import * as tar from 'tar';
+import zlib from 'zlib';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import type { PackageInfo, OperationResult } from '../types.js';
 import { Status } from '../types.js';
 import { TIMEOUTS, SIZES } from '../constants.js';
 import { debug } from '../utils/logger.js';
+import { httpAgent, httpsAgent } from '../utils/http.js';
 import { generateFilename } from '../utils/files.js';
 
 const execAsync = promisify(exec);
 
+export interface TarballContents {
+  /** The package's own package.json (`<root>/package.json`). */
+  manifest: PackageInfo;
+  /** Top-level README text, if the tarball has one. */
+  readme?: string;
+  readmeFilename?: string;
+}
+
+const MAX_MANIFEST_BYTES = SIZES.BUFFER_1MB;
+const MAX_README_BYTES = 4 * SIZES.MB;
+
 /**
- * Extract package.json from tarball using tar library
+ * Read package.json (and the top-level README) out of a .tgz held in memory.
+ *
+ * Streams the gzip through a minimal ustar/GNU/pax header walker and keeps only
+ * the two files it needs; every other entry is skipped without being touched.
+ * Nothing is written to disk. This is the whole point: `npm publish <tgz>`
+ * unpacks the tarball into a temp dir (twice) just to read package.json, which
+ * for a package with 11k tiny files (@tabler/icons) takes minutes on Windows.
+ */
+export function readTarball(data: Buffer, options: { readme?: boolean } = {}): Promise<TarballContents> {
+  const wantReadme = options.readme ?? true;
+  return new Promise((resolve, reject) => {
+    const gunzip = zlib.createGunzip();
+    let pending: Buffer = Buffer.alloc(0);
+    let remaining = 0; // data bytes left in the current entry
+    let padding = 0; // zero padding after the current entry's data
+    let collect: Buffer[] | null = null;
+    let collectKind: 'manifest' | 'fallbackManifest' | 'readme' | null = null;
+    let collectName = '';
+    let longName: string | null = null;
+    let paxPath: string | null = null;
+    let readingMeta: 'L' | 'x' | null = null;
+    let metaChunks: Buffer[] = [];
+
+    let manifest: PackageInfo | null = null;
+    let fallbackManifest: PackageInfo | null = null;
+    let readme: { name: string; text: string } | null = null;
+    let done = false;
+
+    const finish = (error?: Error) => {
+      if (done) return;
+      done = true;
+      gunzip.removeAllListeners('data');
+      gunzip.destroy();
+      if (error) return reject(error);
+      const pkg = manifest ?? fallbackManifest;
+      if (!pkg || !pkg.name || !pkg.version) {
+        return reject(new Error('Invalid package.json - missing name or version'));
+      }
+      resolve({
+        manifest: pkg,
+        ...(readme && { readme: readme.text, readmeFilename: readme.name }),
+      });
+    };
+
+    const endEntry = () => {
+      if (readingMeta) {
+        const text = Buffer.concat(metaChunks).toString('utf8');
+        if (readingMeta === 'L') longName = text.replace(/\0+$/, '');
+        else {
+          const m = text.match(/(?:^|\n)\d+ path=([^\n]*)\n/);
+          if (m) paxPath = m[1];
+        }
+        readingMeta = null;
+        metaChunks = [];
+        return;
+      }
+      if (collect && collectKind) {
+        const body = Buffer.concat(collect).toString('utf8');
+        try {
+          if (collectKind === 'readme') readme = { name: collectName, text: body };
+          else {
+            const parsed = JSON.parse(body) as PackageInfo;
+            if (collectKind === 'manifest') manifest = parsed;
+            else fallbackManifest ??= parsed;
+          }
+        } catch (error) {
+          debug(`Failed to parse ${collectName}: ${(error as Error).message}`);
+        }
+      }
+      collect = null;
+      collectKind = null;
+      // Stop reading as soon as everything wanted is in hand.
+      if (manifest && (readme || !wantReadme)) finish();
+    };
+
+    const parseOctal = (buf: Buffer): number => {
+      // GNU base-256 encoding for sizes >= 8 GiB
+      if (buf[0] & 0x80) {
+        let n = 0;
+        for (let i = 1; i < buf.length; i++) n = n * 256 + buf[i];
+        return n;
+      }
+      const str = buf.toString('ascii').replace(/\0.*$/, '').trim();
+      return str ? parseInt(str, 8) : 0;
+    };
+
+    const onHeader = (header: Buffer): boolean => {
+      // Two zero blocks mark the end; one is enough to stop.
+      if (header.every((b) => b === 0)) {
+        finish();
+        return false;
+      }
+      const type = String.fromCharCode(header[156] || 48);
+      const size = parseOctal(header.subarray(124, 136));
+      const nameField = header.subarray(0, 100).toString('utf8').replace(/\0.*$/s, '');
+      const isUstar = header.subarray(257, 262).toString('ascii') === 'ustar';
+      const prefix = isUstar ? header.subarray(345, 500).toString('utf8').replace(/\0.*$/s, '') : '';
+
+      remaining = size;
+      padding = (512 - (size % 512)) % 512;
+
+      if (type === 'L' || type === 'x') {
+        readingMeta = type;
+        metaChunks = [];
+        return true;
+      }
+      if (type === 'g') return true;
+
+      const entryPath = paxPath ?? longName ?? (prefix ? `${prefix}/${nameField}` : nameField);
+      paxPath = null;
+      longName = null;
+
+      if (type !== '0' && type !== '\0' && type !== '7') return true;
+
+      const parts = entryPath.replace(/^\.\//, '').split('/');
+      if (parts.length === 2) {
+        const base = parts[1];
+        if (base === 'package.json' && size <= MAX_MANIFEST_BYTES) {
+          collectKind = parts[0] === 'package' ? 'manifest' : 'fallbackManifest';
+        } else if (wantReadme && /^readme(\.|$)/i.test(base) && size <= MAX_README_BYTES && !readme) {
+          collectKind = 'readme';
+        }
+      } else if (parts.length === 1 && parts[0] === 'package.json' && size <= MAX_MANIFEST_BYTES) {
+        collectKind = 'manifest';
+      }
+      if (collectKind) {
+        collect = [];
+        collectName = parts[parts.length - 1];
+      }
+      return true;
+    };
+
+    gunzip.on('data', (chunk: Buffer) => {
+      pending = pending.length ? Buffer.concat([pending, chunk]) : chunk;
+      let offset = 0;
+      while (!done) {
+        if (remaining > 0) {
+          const take = Math.min(remaining, pending.length - offset);
+          if (take === 0) break;
+          const slice = pending.subarray(offset, offset + take);
+          if (readingMeta) metaChunks.push(Buffer.from(slice));
+          else if (collect) collect.push(Buffer.from(slice));
+          offset += take;
+          remaining -= take;
+          if (remaining === 0) {
+            endEntry();
+          }
+          continue;
+        }
+        if (padding > 0) {
+          const skip = Math.min(padding, pending.length - offset);
+          if (skip === 0) break;
+          offset += skip;
+          padding -= skip;
+          continue;
+        }
+        if (pending.length - offset < 512) break;
+        const header = pending.subarray(offset, offset + 512);
+        offset += 512;
+        if (!onHeader(header)) break;
+        if (remaining === 0) endEntry();
+      }
+      pending = offset >= pending.length ? Buffer.alloc(0) : pending.subarray(offset);
+    });
+    gunzip.on('end', () => finish());
+    gunzip.on('error', (error) => finish(new Error(`Corrupt tarball: ${error.message}`)));
+    gunzip.end(data);
+  });
+}
+
+/**
+ * Extract package.json from a tarball on disk.
  */
 export async function getPackageInfo(tarballPath: string): Promise<PackageInfo> {
-  const results: { main: PackageInfo | null; fallback: PackageInfo | null } = {
-    main: null,
-    fallback: null,
-  };
-
-  await tar.t({
-    file: tarballPath,
-    onentry: (entry) => {
-      if (
-        entry.path === 'package/package.json' ||
-        entry.path === 'package.json' ||
-        entry.path.endsWith('/package.json')
-      ) {
-        const chunks: Buffer[] = [];
-        let chunkSize = 0;
-
-        entry.on('data', (chunk: Buffer) => {
-          chunkSize += chunk.length;
-          if (chunkSize > SIZES.BUFFER_1MB) {
-            entry.destroy();
-            return;
-          }
-          chunks.push(chunk);
-        });
-
-        entry.on('end', () => {
-          try {
-            if (chunkSize > SIZES.BUFFER_1MB) {
-              debug(`Package.json too large in ${path.basename(tarballPath)}`);
-              return;
-            }
-
-            const parsed = JSON.parse(Buffer.concat(chunks).toString()) as PackageInfo;
-
-            if (entry.path === 'package/package.json' || entry.path === 'package.json') {
-              results.main = parsed;
-            } else if (!results.main) {
-              results.fallback = parsed;
-            }
-          } catch (parseError) {
-            debug(`Failed to parse package.json from ${path.basename(tarballPath)}: ${(parseError as Error).message}`);
-          }
-        });
-      }
-    },
-  });
-
-  const packageJson = results.main ?? results.fallback;
-
-  if (!packageJson || !packageJson.name || !packageJson.version) {
-    throw new Error('Invalid package.json - missing name or version');
-  }
-
-  return packageJson;
+  const { manifest } = await readTarball(await fs.readFile(tarballPath), { readme: false });
+  return manifest;
 }
 
 /**
@@ -143,6 +274,8 @@ export async function downloadTarball(
       url: tarballUrl,
       headers,
       responseType: 'stream',
+      httpAgent,
+      httpsAgent,
       timeout: TIMEOUTS.DOWNLOAD * 2,
       validateStatus: (status) => status === 200,
     });

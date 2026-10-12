@@ -11,7 +11,7 @@ import { Status, Existence } from '../types.js';
 import { CONCURRENCY, DEFAULT_CONFIG, BLOCKED_REGISTRIES } from '../constants.js';
 import { packageExists } from '../core/registry.js';
 import { getPackageInfo } from '../core/tarball.js';
-import { publishPackage } from '../core/publisher.js';
+import { compareVersions, publishPackage } from '../core/publisher.js';
 import { verifyAuth } from '../utils/http.js';
 import { setDebugMode } from '../utils/logger.js';
 import { validateDirectory, validateRegistryUrl } from '../utils/validation.js';
@@ -61,6 +61,7 @@ export async function publishPackages(config: Partial<PublishConfig> = {}): Prom
     concurrency,
     skipExisting,
     dryRun,
+    timeout,
     debug: debugEnabled,
   } = finalConfig;
 
@@ -88,10 +89,7 @@ export async function publishPackages(config: Partial<PublishConfig> = {}): Prom
   printHeader('Publish Packages', dryRun ? chalk.yellow('DRY RUN MODE') : undefined);
   printInfo('Packages', packagesDir);
   printInfo('Registry', registryUrl);
-
-  if (!dryRun) {
-    console.log(chalk.yellow(`\n⚠ Make sure you are logged in: npm login --registry ${registryUrl}\n`));
-  }
+  console.log('');
 
   // Verify authentication
   const authSpinner = createSpinner('Verifying authentication...');
@@ -197,6 +195,22 @@ export async function publishPackages(config: Partial<PublishConfig> = {}): Prom
     if (list) list.push(tarball);
     else groups.set(name, [tarball]);
   }
+  // Oldest version first, so each publish can take `latest` in turn instead of
+  // older versions landing after a newer one and needing a legacy tag.
+  for (const list of groups.values()) {
+    list.sort((a, b) =>
+      compareVersions(packageInfoCache.get(a)?.info.version ?? '0.0.0', packageInfoCache.get(b)?.info.version ?? '0.0.0')
+    );
+  }
+  // Biggest packages first so a slow upload starts early instead of trailing
+  // alone at the end of the run.
+  const orderedGroups = await Promise.all(
+    Array.from(groups.values()).map(async (list) => {
+      const sizes = await Promise.all(list.map((t) => fs.stat(t).then((st) => st.size, () => 0)));
+      return { list, bytes: sizes.reduce((a, b) => a + b, 0) };
+    })
+  );
+  orderedGroups.sort((a, b) => b.bytes - a.bytes);
 
   const limit = pLimit(concurrency);
   const progress = new ProgressTracker('Publishing', tarballs.length, preSkippedCount);
@@ -205,7 +219,7 @@ export async function publishPackages(config: Partial<PublishConfig> = {}): Prom
   let skipped = preSkippedCount;
 
   await Promise.all(
-    Array.from(groups.values()).map((groupTarballs) =>
+    orderedGroups.map(({ list: groupTarballs }) =>
       limit(async () => {
         for (const tarball of groupTarballs) {
           const cached = packageInfoCache.get(tarball);
@@ -222,6 +236,7 @@ export async function publishPackages(config: Partial<PublishConfig> = {}): Prom
           const result = await publishPackage(tarball, registryUrl, {
             packageInfo: cached?.info,
             dryRun,
+            ...(timeout !== undefined && { timeout: timeout * 1000 }),
           });
 
           if (result.status === Status.SUCCESS) {

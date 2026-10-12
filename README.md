@@ -102,7 +102,7 @@ Options:
   -r, --registry <url>       Source registry (default: https://registry.npmjs.org)
   --registry-state <path>    Registry state file for incremental fetching
   --skip-optional            Skip optional dependencies
-  --concurrency <number>     Parallel downloads (default: 5)
+  --concurrency <number>     Parallel downloads (default: 16)
   --debug                    Enable debug output
 ```
 
@@ -114,11 +114,47 @@ node cli.cjs publish [options]
 Options:
   -p, --packages <path>      Packages directory (default: ./airgap-packages)
   -r, --registry <url>       Target registry (default: http://localhost:4873)
-  --concurrency <number>     Parallel publishes (default: 3)
+  --concurrency <number>     Parallel publishes (default: 8)
+  --timeout <seconds>        Give up on a publish after this long with no activity (0 = never, default: 300)
   --no-skip-existing         Publish all packages even if they exist
   --dry-run                  Preview without publishing
   --debug                    Enable debug output
 ```
+
+#### Publish speed (v2.5.0)
+
+`publish` talks to the registry directly over HTTP, sending the same document `npm publish` sends,
+instead of running `npm publish` once per tarball. That matters more than it sounds: given a `.tgz`,
+npm unpacks the whole tarball into a temp folder (twice) just to read its `package.json`, so its cost
+grows with the **number of files**, not the size. `@tabler/icons` is a 1.2 MB tarball with 11,446
+files; npm spent 6.4 s on it on Linux before uploading a byte, and minutes on Windows (Defender scans
+every file it creates), which hit the old fixed kill timer.
+
+Now each tarball is read once into memory, `package.json` and the README are picked out of the gzip
+stream, and nothing touches the disk:
+
+| 14 tarballs incl. @tabler/icons, next, typescript | 2.4.0 (`npm publish`) | 2.5.0 (HTTP) |
+| ------------------------------------------------- | --------------------- | ------------ |
+| Publish to an empty Verdaccio                      | 29.9 s                | 3.6 s        |
+| Reading `@tabler/icons`' manifest                  | 6.4 s                 | 18 ms        |
+
+Also:
+
+- **Keep-alive connections** for every request (probes, publishes, downloads).
+- **One registry lookup per package name**, using the abbreviated metadata document, shared by the
+  pre-check, the tag decision and the orphan check.
+- **No `npm` subprocesses**: auth is verified with `GET /-/whoami`, and `.npmrc` paths are resolved
+  in-process instead of via `npm config get`.
+- **Inactivity timeout instead of a wall clock.** A publish is only abandoned after `--timeout`
+  seconds with no bytes moving, so a big upload to a slow registry is never killed while it is still
+  progressing.
+- **Biggest packages first**, versions of one package oldest first (so each takes `latest` in turn).
+- **Real error messages** in `publish-report.json` (`HTTP 403: user admin is not allowed to publish
+  package x`), not just `Command failed: npm publish …`.
+
+Credentials come from the same places npm reads them: `.npmrc` files (`_authToken`, `_auth`,
+`username` + `_password`), `npm_config_*` env vars such as `npm_config__auth`, and
+`NPM_TOKEN` / `NODE_AUTH_TOKEN`.
 
 #### Publish reliability (v2.4.0)
 
@@ -233,14 +269,15 @@ Create `pnpm-airgap.config.json`:
   "fetch": {
     "lockfilePath": "./pnpm-lock.yaml",
     "outputDir": "./airgap-packages",
-    "concurrency": 5,
+    "concurrency": 16,
     "registryUrl": "https://registry.npmjs.org",
     "skipOptional": false
   },
   "publish": {
     "packagesDir": "./airgap-packages",
     "registryUrl": "http://localhost:4873",
-    "concurrency": 3,
+    "concurrency": 8,
+    "timeout": 300,
     "skipExisting": true
   },
   "sync": {
@@ -371,7 +408,7 @@ Both fetch and publish commands generate JSON reports:
 ### Authentication Issues
 
 ```bash
-# Verify you're logged in
+# Verify you're logged in (publish checks the same thing with GET /-/whoami)
 npm whoami --registry http://localhost:4873
 
 # Re-login if needed

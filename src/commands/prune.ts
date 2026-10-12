@@ -87,7 +87,7 @@ async function fetchRegistryVersions(
   await Promise.all(
     Array.from(packageList.keys()).map((name) =>
       limit(async () => {
-        const metadata = await getPackageMetadata(name, registryUrl, { authHeader });
+        const metadata = await getPackageMetadata(name, registryUrl, { authHeader, abbreviated: true });
         result.set(name, metadata?.versions ? Object.keys(metadata.versions) : []);
       })
     )

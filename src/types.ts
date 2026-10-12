@@ -87,6 +87,8 @@ export interface PublishConfig {
   skipExisting: boolean;
   dryRun: boolean;
   debug: boolean;
+  /** Seconds with no upload/response activity before a publish is abandoned (0 = never). */
+  timeout?: number;
 }
 
 // Sync configuration

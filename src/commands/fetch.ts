@@ -104,10 +104,9 @@ export async function fetchDependencies(config: Partial<FetchConfig> = {}): Prom
   let preExistingFiles = 0;
   const packagesArray = Array.from(packagesToFetch.values());
 
+  const existingFiles = new Set(await fs.readdir(outputDir));
   for (const pkg of packagesArray) {
-    const filename = generateFilename(pkg.name, pkg.version);
-    const filePath = path.join(outputDir, filename);
-    if (await fs.pathExists(filePath)) {
+    if (existingFiles.has(generateFilename(pkg.name, pkg.version))) {
       preExistingFiles++;
     }
   }

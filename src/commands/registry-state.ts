@@ -194,7 +194,7 @@ export async function exportRegistryState(config: Partial<RegistryStateConfig> =
     packageNames.map((name) =>
       limit(async () => {
         try {
-          const metadata = await getPackageMetadata(name, registryUrl, { authHeader });
+          const metadata = await getPackageMetadata(name, registryUrl, { authHeader, abbreviated: true });
 
           if (metadata?.versions) {
             const versions = Object.keys(metadata.versions);
