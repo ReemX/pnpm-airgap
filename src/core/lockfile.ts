@@ -138,18 +138,36 @@ export async function parseLockfile(
   const { registryUrl = DEFAULTS.NPM_REGISTRY_URL, skipOptional = false } = options;
 
   const content = await fs.readFile(lockfilePath, 'utf8');
-  const lockfile = yaml.load(content) as LockfileData;
+  const documents = yaml.loadAll(content);
+  if (documents.length === 0) {
+    throw new Error('Lockfile contains no YAML documents');
+  }
+  const lockfiles = documents.map((document, index) => {
+    if (!document || typeof document !== 'object' || Array.isArray(document)) {
+      throw new Error(`Invalid lockfile document ${index + 1}: expected a YAML mapping`);
+    }
+    return document as LockfileData;
+  });
 
   const packages = new Map<string, LockfilePackage>();
   const skipped = { nonRegistry: 0, invalid: 0, duplicate: 0, optional: 0 };
 
-  const lockfileVersion = String(lockfile.lockfileVersion || '6.0');
+  const lockfileVersion = String(lockfiles[0].lockfileVersion || '6.0');
+  for (const [index, lockfile] of lockfiles.entries()) {
+    const version = String(lockfile.lockfileVersion || '6.0');
+    if (version !== lockfileVersion) {
+      throw new Error(
+        `Inconsistent lockfileVersion: document 1 uses ${lockfileVersion}, document ${index + 1} uses ${version}`
+      );
+    }
+  }
   const majorVersion = parseInt(lockfileVersion.split('.')[0], 10);
 
   debug(`Parsing lockfile version ${lockfileVersion} (major: ${majorVersion})`);
 
-  // Process packages section
-  if (lockfile.packages) {
+  // Read every document's packages before snapshots so full records always win.
+  for (const lockfile of lockfiles) {
+    if (!lockfile.packages) continue;
     for (const [key, value] of Object.entries(lockfile.packages)) {
       if (skipOptional && value?.optional === true) {
         skipped.optional++;
@@ -198,7 +216,8 @@ export async function parseLockfile(
   }
 
   // For v9+, also check snapshots section
-  if (majorVersion >= 9 && lockfile.snapshots) {
+  for (const lockfile of lockfiles) {
+    if (!(majorVersion >= 9) || !lockfile.snapshots) continue;
     for (const [key, value] of Object.entries(lockfile.snapshots)) {
       const packageInfo = parsePackageKey(key);
       if (!packageInfo) continue;
