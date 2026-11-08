@@ -1,0 +1,35 @@
+---
+lockfileVersion: '9.0'
+
+importers:
+  .:
+    configDependencies: {}
+    packageManagerDependencies:
+      pnpm:
+        specifier: 12.16.1
+        version: 12.16.1
+
+packages:
+  pnpm@12.16.1:
+    resolution:
+      tarball: https://registry.npmjs.org/pnpm/-/pnpm-12.16.1.tgz
+
+snapshots:
+  pnpm@12.16.1: {}
+---
+lockfileVersion: '9.0'
+
+importers:
+  .:
+    dependencies:
+      chalk:
+        specifier: ^5.6.2
+        version: 5.6.2
+
+packages:
+  chalk@5.6.2:
+    resolution:
+      tarball: https://registry.npmjs.org/chalk/-/chalk-5.6.2.tgz
+
+snapshots:
+  chalk@5.6.2: {}

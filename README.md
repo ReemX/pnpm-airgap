@@ -18,6 +18,7 @@ Getting pnpm projects into secure, offline, or air-gapped environments is challe
 - Publishes packages to any npm-compatible registry (Verdaccio, Nexus, Artifactory)
 - Works as a single file - no `npm install` required in airgap
 - Supports pnpm lockfile versions 5.x, 6.x, and 9.x
+- Reads both boot and project documents in multi-document lockfiles, including the pinned pnpm version and config dependencies
 
 ## Quick Start
 
